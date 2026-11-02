@@ -215,7 +215,13 @@ graphify() {
     # timeout(1) needs a real executable, not the `command` builtin.
     local bin
     bin="$(whence -p graphify)" || return $rc
-    timeout --kill-after=5s "${budget}s" \
+    # macOS ships no timeout(1); Homebrew coreutils provides it as gtimeout.
+    local to="${commands[timeout]:-${commands[gtimeout]}}"
+    if [[ -z "$to" ]]; then
+        print -u2 "graphify: no timeout/gtimeout (brew install coreutils); skipped Obsidian export"
+        return $rc
+    fi
+    "$to" --kill-after=5s "${budget}s" \
         "$bin" export obsidian --graph "$root/graphify-out/graph.json" --dir "$vault"
     local erc=$?
     if (( erc == 124 || erc == 137 )); then
@@ -232,7 +238,7 @@ graphify() {
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
 
 # GitHub MCP plugin for Claude Code (reuses gh CLI login)
-export GITHUB_PERSONAL_ACCESS_TOKEN="$(gh auth token 2>/dev/null)"
+command -v gh >/dev/null && export GITHUB_PERSONAL_ACCESS_TOKEN="$(gh auth token 2>/dev/null)"
 
 # bun completions
 [ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"

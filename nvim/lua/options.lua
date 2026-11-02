@@ -24,7 +24,8 @@ o.undolevels = 10000
 -- so it must be cleared before molten-nvim (a python3 remote plugin) can work.
 vim.g.loaded_python3_provider = nil
 do
-  local host = vim.fn.expand "~/.virtualenvs/neovim/bin/python"
+  local sub = vim.fn.has "win32" == 1 and "/Scripts/python.exe" or "/bin/python"
+  local host = vim.fn.expand("~/.virtualenvs/neovim" .. sub)
   if vim.fn.executable(host) == 1 then
     vim.g.python3_host_prog = host
   end

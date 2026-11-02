@@ -1,0 +1,4 @@
+# Keep LF everywhere so install.sh / .zshrc / kitty-new-tab still run when the
+# repo is cloned by Windows git and then used from WSL.
+* text=auto eol=lf
+*.ps1 text eol=crlf

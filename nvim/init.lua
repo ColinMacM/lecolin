@@ -10,7 +10,7 @@ do
     local ver = vim.trim(vim.fn.readfile(alias)[1] or "")
     local nodebin = vim.fn.expand("~/.nvm/versions/node/" .. ver .. "/bin")
     if ver ~= "" and vim.fn.isdirectory(nodebin) == 1 then
-      vim.env.PATH = nodebin .. ":" .. vim.env.PATH
+      vim.env.PATH = nodebin .. (vim.fn.has "win32" == 1 and ";" or ":") .. vim.env.PATH
     end
   end
 end
@@ -20,7 +20,7 @@ end
 do
   local cargobin = vim.fn.expand "~/.cargo/bin"
   if vim.fn.isdirectory(cargobin) == 1 and not vim.env.PATH:find(cargobin, 1, true) then
-    vim.env.PATH = cargobin .. ":" .. vim.env.PATH
+    vim.env.PATH = cargobin .. (vim.fn.has "win32" == 1 and ";" or ":") .. vim.env.PATH
   end
 end
 
