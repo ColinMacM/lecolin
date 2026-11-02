@@ -1,0 +1,31 @@
+#!/usr/bin/env zsh
+# Runs inside a fresh kitty tab (see `map ctrl+shift+t` in kitty.conf).
+# Shows kitty's native `ask` dialog (same one used for close/paste confirms),
+# then replaces itself with the chosen program.
+#   a / Enter  -> herdr (agent orchestrator; attaches to the running session)
+#   t          -> plain interactive shell
+#   Esc        -> close the tab
+# Falls back to a shell if herdr is not installed.
+
+emulate -L zsh
+
+shell=${SHELL:-zsh}
+
+if ! command -v herdr >/dev/null 2>&1; then
+  exec "$shell"
+fi
+
+out=$(kitten ask --type choices \
+  --title 'New tab' \
+  --message 'What is this tab for?' \
+  --choice 'a;green:agent orchestrator (herdr)' \
+  --choice 't;blue:terminal' \
+  --default a)
+
+[[ $out =~ '"response": *"([^"]*)"' ]] && choice=$match[1] || choice=''
+
+case $choice in
+  a) exec herdr ;;
+  t) exec "$shell" ;;
+  *) exit 0 ;;
+esac
