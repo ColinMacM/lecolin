@@ -1,9 +1,7 @@
--- IDE features: language servers/debuggers installed by Mason, and a debugger UI.
+-- Debugger, plus "no hints" settings.
 --
--- Mason installs everything below into stdpath("data")/mason on Linux, macOS
--- and Windows; NvChad already puts mason/bin on nvim's PATH. Language servers
--- are enabled in configs/lspconfig.lua (only once their binary exists, so the
--- first launch after a fresh install needs one restart).
+-- Mason installs the tools below into stdpath("data")/mason on Linux, macOS and
+-- Windows; NvChad already puts mason/bin on nvim's PATH.
 --
 -- Debugging (nvim-dap):
 --   Python      debugpy; the program runs with the active conda env / venv
@@ -23,14 +21,21 @@ return {
     dependencies = { "mason-org/mason.nvim" },
     event = "VeryLazy",
     opts = {
+      -- No language servers here: they are off on purpose (configs/lspconfig.lua).
       ensure_installed = {
-        "clangd", "clang-format", -- C / C++
-        "basedpyright", "ruff",   -- Python types + lint
-        "debugpy",                -- Python debugger
-        "codelldb",               -- C / C++ / Rust debugger
+        "clang-format", -- C / C++ formatting, only when you run it
+        "debugpy",      -- Python debugger
+        "codelldb",     -- C / C++ / Rust debugger
       },
       run_on_start = true,
     },
+  },
+
+  -- No completion popup while typing. Ctrl+Space still opens it on demand
+  -- (buffer words and file paths only, since no language server runs).
+  {
+    "hrsh7th/nvim-cmp",
+    opts = { completion = { autocomplete = false } },
   },
 
   {
