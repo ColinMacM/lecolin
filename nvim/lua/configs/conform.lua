@@ -5,6 +5,8 @@ local options = {
     python = { "trim_whitespace" },
     rust = { "rustfmt" },
     swift = { "swiftformat" },
+    c = { "clang-format" },
+    cpp = { "clang-format" },
     -- css = { "prettier" },
     -- html = { "prettier" },
   },

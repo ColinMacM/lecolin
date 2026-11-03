@@ -55,6 +55,7 @@ return {
       ensure_installed = {
         "lua", "luadoc", "printf", "vim", "vimdoc",
         "swift", "rust", "toml",
+        "c", "cpp", "cmake", "python",
       },
     },
   },
