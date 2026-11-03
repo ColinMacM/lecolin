@@ -1,0 +1,11 @@
+{
+  "mcpServers": {},
+  "disabledServers": [
+    "puppeteer",
+    "playwright",
+    "browserbase",
+    "browser-tools",
+    "browser-use",
+    "browser"
+  ]
+}

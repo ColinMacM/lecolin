@@ -4,6 +4,8 @@ return {
     -- rendered inside nvim, leetcode.nvim style (chapter tree + reading pane).
     dir = "~/code/rustdocs.nvim",
     name = "rustdocs.nvim",
+    -- This local-only plugin is not present on every machine.
+    enabled = vim.fn.isdirectory(vim.fn.expand "~/code/rustdocs.nvim") == 1,
     -- html is what the page parser needs; rust/toml give code blocks real
     -- syntax highlighting. TSInstall (not TSUpdate) is what adds parsers on
     -- nvim-treesitter's main branch.

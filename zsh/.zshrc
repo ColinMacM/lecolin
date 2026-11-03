@@ -1,5 +1,22 @@
-# If you come from bash you might have to change your $PATH.
-# export PATH=$HOME/bin:$HOME/.local/bin:/usr/local/bin:$PATH
+# Keep repeated sourcing from duplicating PATH entries.
+typeset -U PATH path
+
+# GUI terminals can start non-login shells, so initialize Homebrew here too.
+# Linux never probes macOS installations; Intel and Apple Silicon are supported.
+if [[ "$OSTYPE" == darwin* ]]; then
+  for _brew in /opt/homebrew/bin/brew /usr/local/bin/brew; do
+    [[ -x "$_brew" ]] || continue
+    _brew_prefix="${_brew:h:h}"
+    if [[ ":$PATH:" != *":$_brew_prefix/bin:"* ]]; then
+      eval "$("$_brew" shellenv)"
+    fi
+    if [[ -d "$_brew_prefix/opt/rustup/bin" ]]; then
+      path=("$_brew_prefix/opt/rustup/bin" $path)
+    fi
+    break
+  done
+  unset _brew _brew_prefix
+fi
 
 # Path to your Oh My Zsh installation.
 export ZSH="$HOME/.oh-my-zsh"
@@ -70,9 +87,12 @@ ZSH_THEME="robbyrussell"
 # Custom plugins may be added to $ZSH_CUSTOM/plugins/
 # Example format: plugins=(rails git textmate ruby lighthouse)
 # Add wisely, as too many plugins slow down shell startup.
-plugins=(git zsh-autosuggestions)
+plugins=(git)
+if [[ -f "${ZSH_CUSTOM:-$ZSH/custom}/plugins/zsh-autosuggestions/zsh-autosuggestions.plugin.zsh" ]]; then
+  plugins+=(zsh-autosuggestions)
+fi
 
-source $ZSH/oh-my-zsh.sh
+[[ -f "$ZSH/oh-my-zsh.sh" ]] && source "$ZSH/oh-my-zsh.sh"
 
 # User configuration
 
@@ -103,31 +123,20 @@ source $ZSH/oh-my-zsh.sh
 # alias zshconfig="mate ~/.zshrc"
 # alias ohmyzsh="mate ~/.oh-my-zsh"
 
-# Lazy-load nvm: sourcing nvm.sh costs ~0.3s on every shell (and was previously
-# done twice). Instead define stubs that load nvm on first use of a node tool.
-# Trade-off: auto .nvmrc switching on `cd` won't fire until you run one of these
-# once per session.
+# Lazy-load nvm only when installed, leaving system Node tools alone otherwise.
+# Each stub is self-contained so it can also be reused in a child shell.
 export NVM_DIR="$HOME/.nvm"
-# The stub body is SELF-CONTAINED on purpose. It used to call a shared _load_nvm
-# helper. Claude Code snapshots the shell's functions once per session and replays
-# them into every non-interactive shell it runs; the seven stubs survived that but
-# _load_nvm's definition did not, so each stub called a command that no longer
-# existed, never reached its `unset -f`, and recursed into itself until zsh hit
-# FUNCNEST. Inlining the loader means a stub can never outlive it.
-#
-# `claude` is deliberately NOT in this list: it is a native binary
-# (~/.local/bin/claude -> ~/.local/share/claude/versions/*, a standalone ELF that
-# links only libc) and needs nothing from node or nvm. Stubbing it forced a 0.3s
-# nvm source onto every invocation for no reason.
-for _cmd in nvm node npm npx yarn pnpm rea; do
-  eval "${_cmd}() {
-    unset -f nvm node npm npx yarn pnpm rea 2>/dev/null
-    [ -s \"\$NVM_DIR/nvm.sh\" ] && \\. \"\$NVM_DIR/nvm.sh\"
-    [ -s \"\$NVM_DIR/bash_completion\" ] && \\. \"\$NVM_DIR/bash_completion\"
-    ${_cmd} \"\$@\"
-  }"
-done
-unset _cmd
+if [[ -s "$NVM_DIR/nvm.sh" ]]; then
+  for _cmd in nvm node npm npx yarn pnpm rea; do
+    eval "${_cmd}() {
+      unset -f nvm node npm npx yarn pnpm rea 2>/dev/null
+      [ -s \"\$NVM_DIR/nvm.sh\" ] && \\. \"\$NVM_DIR/nvm.sh\"
+      [ -s \"\$NVM_DIR/bash_completion\" ] && \\. \"\$NVM_DIR/bash_completion\"
+      ${_cmd} \"\$@\"
+    }"
+  done
+  unset _cmd
+fi
 export PATH="$HOME/.local/bin:$PATH"
 
 # >>> conda initialize >>>
@@ -137,7 +146,7 @@ export PATH="$HOME/.local/bin:$PATH"
 # python spawn (~0s). Base is NOT auto-activated; use `conda activate <env>`.
 if [ -f "$HOME/Apps/miniconda3/etc/profile.d/conda.sh" ]; then
     . "$HOME/Apps/miniconda3/etc/profile.d/conda.sh"
-else
+elif [[ -d "$HOME/Apps/miniconda3/bin" ]]; then
     export PATH="$HOME/Apps/miniconda3/bin:$PATH"
 fi
 # <<< conda initialize <<<
@@ -177,7 +186,7 @@ fi
 # pairs the two for agent-driven runs and sets GRAPHIFY_SYNC=1, which this wrapper
 # honours so the export never runs twice.
 graphify() {
-    # Repos that keep graphify output inside their vault (antivibe-robot-model):
+    # Repos that keep graphify output inside their vault:
     # point graphify at it when run from the repo root.
     if [[ -z "${GRAPHIFY_OUT:-}" && -d Knowledge-Base/graphify-out ]]; then
         GRAPHIFY_OUT=Knowledge-Base/graphify-out command graphify "$@"
@@ -232,7 +241,6 @@ graphify() {
 
 # Claude Code account profiles: `cc` to pick/launch, `claude-profile` to manage.
 [ -f "$HOME/.claude-profiles/shell.zsh" ] && . "$HOME/.claude-profiles/shell.zsh"
-# alias vim=nvim   # removed: real vim installed (vim.gtk3)
 
 # Rust toolchain (rustup): puts rustc, cargo, rust-analyzer on PATH.
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
@@ -246,3 +254,8 @@ command -v gh >/dev/null && export GITHUB_PERSONAL_ACCESS_TOKEN="$(gh auth token
 # bun
 export BUN_INSTALL="$HOME/.bun"
 export PATH="$BUN_INSTALL/bin:$PATH"
+
+# Tailscale's CLI is bundled in the macOS app rather than installed on PATH.
+if [[ "$OSTYPE" == darwin* && -x /Applications/Tailscale.app/Contents/MacOS/Tailscale ]]; then
+  alias tailscale='/Applications/Tailscale.app/Contents/MacOS/Tailscale'
+fi

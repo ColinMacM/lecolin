@@ -3,6 +3,8 @@ local options = {
     lua = { "stylua" },
     markdown = { "prettier" },
     python = { "trim_whitespace" },
+    rust = { "rustfmt" },
+    swift = { "swiftformat" },
     -- css = { "prettier" },
     -- html = { "prettier" },
   },

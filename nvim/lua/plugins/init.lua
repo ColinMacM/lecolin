@@ -48,13 +48,14 @@ return {
   -- test new blink
   -- { import = "nvchad.blink.lazyspec" },
 
-  -- {
-  -- 	"nvim-treesitter/nvim-treesitter",
-  -- 	opts = {
-  -- 		ensure_installed = {
-  -- 			"vim", "lua", "vimdoc",
-  --      "html", "css"
-  -- 		},
-  -- 	},
-  -- },
+  {
+    "nvim-treesitter/nvim-treesitter",
+    opts = {
+      -- Keep NvChad's base parsers alongside the Mac's language additions.
+      ensure_installed = {
+        "lua", "luadoc", "printf", "vim", "vimdoc",
+        "swift", "rust", "toml",
+      },
+    },
+  },
 }

@@ -1,0 +1,24 @@
+symbolPreset: nerd
+composer:
+  shape: borderless
+theme:
+  dark: titanium
+  light: light
+modelRoles:
+  smol: cursor/grok-4.7
+  vision: openai-codex/gpt-6-astra:high
+  slow: anthropic/claude-fable-5-1:high
+  plan: openai-codex/gpt-6.1-sol:high
+  commit: anthropic/claude-sonnet-5-5
+  tiny: cursor/grok-4.7:low
+  memory: cursor/grok-4.7:high
+  default: openai-codex/gpt-6.1-sol:high
+memory:
+  backend: "off"
+tui:
+  vimMode: true
+claudeResets:
+  autoRedeem: "no"
+hideThinkingBlock: false
+browser:
+  enabled: false

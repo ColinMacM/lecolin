@@ -3,7 +3,7 @@
 #
 # 1. Installs the tools these configs use, only if missing: zsh, git, curl,
 #    ripgrep, unzip, neovim, kitty, zoxide, pay-respects, nvm + node LTS,
-#    oh-my-zsh, zsh-autosuggestions.
+#    oh-my-zsh, zsh-autosuggestions, omp.
 # 2. Symlinks the configs into place.
 #
 # Safe to re-run. Anything already at a target path that is not our symlink is
@@ -23,15 +23,16 @@ export PATH="$LOCAL_BIN:$PATH"
 have() { command -v "$1" >/dev/null 2>&1; }
 say()  { printf '%-8s %s\n' "$1" "$2"; }
 
-link() {  # link <source in repo> <target>
-  local src="$REPO/$1" dst="$2"
+link() {  # link <source in repo> <target> [backup path]
+  local src="$REPO/$1" dst="$2" backup="${3:-$2.pre-lecolin.$STAMP}"
   mkdir -p "$(dirname "$dst")"
   if [ -L "$dst" ] && [ "$(readlink "$dst")" = "$src" ]; then
     say ok "$dst"; return
   fi
   if [ -e "$dst" ] || [ -L "$dst" ]; then
-    mv "$dst" "$dst.pre-lecolin.$STAMP"
-    say backup "$dst -> $dst.pre-lecolin.$STAMP"
+    mkdir -p "$(dirname "$backup")"
+    mv "$dst" "$backup"
+    say backup "$dst -> $backup"
   fi
   ln -s "$src" "$dst"
   say linked "$dst -> $src"
@@ -62,7 +63,7 @@ install_tools() {
   have rg || want+=(ripgrep)
   [ ${#want[@]} -gt 0 ] && pkg_install "${want[@]}"
 
-  # Neovim: distro packages are often too old for NvChad (needs >= 0.10),
+  # Neovim: distro packages are often too old for omp.nvim (needs >= 0.11),
   # so use the official release build.
   if ! have nvim; then
     if [ "$OS" = Darwin ]; then
@@ -89,6 +90,16 @@ install_tools() {
   if have zoxide; then say ok zoxide; else curl -fsSL https://raw.githubusercontent.com/ajeetdsouza/zoxide/main/install.sh | sh; fi
   if have pay-respects; then say ok pay-respects; else curl -fsSL https://raw.githubusercontent.com/iffse/pay-respects/main/install.sh | sh; fi
 
+  # Use the recorded harness version on fresh machines; do not replace an
+  # existing omp installation (which may be a development build).
+  if have omp; then
+    say ok "omp ($(omp --version))"
+  else
+    local omp_version
+    read -r omp_version < "$REPO/omp/version"
+    curl -fsSL https://omp.sh/install | sh -s -- --binary --ref "v$omp_version"
+  fi
+
   # nvm + node: nvim needs node for prettier, tree-sitter and node-based LSPs.
   if [ ! -s "$HOME/.nvm/nvm.sh" ]; then
     PROFILE=/dev/null bash -c "$(curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh)"
@@ -107,7 +118,19 @@ link zsh/.zshrc          "$HOME/.zshrc"
 link nvim                "$HOME/.config/nvim"
 link kitty/kitty.conf    "$HOME/.config/kitty/kitty.conf"
 link kitty/ssh.conf      "$HOME/.config/kitty/ssh.conf"
+link kitty/current-theme.conf "$HOME/.config/kitty/current-theme.conf"
+link kitty/scrollback.lua     "$HOME/.config/kitty/scrollback.lua"
+link kitty/os-macos.conf      "$HOME/.config/kitty/os-macos.conf"
 link bin/kitty-new-tab   "$LOCAL_BIN/kitty-new-tab"
+link omp/config.yml     "$HOME/.omp/agent/config.yml"
+link omp/mcp.json       "$HOME/.omp/agent/mcp.json"
+for skill in "$REPO"/omp/skills/*; do
+  [ -d "$skill" ] || continue
+  name="$(basename "$skill")"
+  # Keep backup SKILL.md files outside the active discovery directory.
+  link "omp/skills/$name" "$HOME/.omp/agent/skills/$name" \
+    "$HOME/.omp/agent/skills.pre-lecolin.$STAMP/$name"
+done
 
 echo
 if [ "$(basename "${SHELL:-}")" != zsh ]; then
