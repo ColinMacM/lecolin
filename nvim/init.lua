@@ -57,6 +57,7 @@ require "autocmds"
 require("bookmode").setup()
 require("spanbottom").setup()
 require("workspace").setup()
+require("lsptoggle").setup() -- `:lsp` toggles language servers + completion popup
 
 vim.schedule(function()
   require "mappings"

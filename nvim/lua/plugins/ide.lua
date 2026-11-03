@@ -1,4 +1,4 @@
--- Debugger, plus "no hints" settings.
+-- Debugger, language-server binaries, and the "LSP off by default" settings.
 --
 -- Mason installs the tools below into stdpath("data")/mason on Linux, macOS and
 -- Windows; NvChad already puts mason/bin on nvim's PATH.
@@ -21,9 +21,10 @@ return {
     dependencies = { "mason-org/mason.nvim" },
     event = "VeryLazy",
     opts = {
-      -- No language servers here: they are off on purpose (configs/lspconfig.lua).
+      -- Language servers are installed but only start after `:lsp` (lua/lsptoggle.lua).
       ensure_installed = {
-        "clang-format", -- C / C++ formatting, only when you run it
+        "clangd", "clang-format", -- C / C++
+        "basedpyright", "ruff",   -- Python
         "debugpy",      -- Python debugger
         "codelldb",     -- C / C++ / Rust debugger
       },
@@ -31,8 +32,8 @@ return {
     },
   },
 
-  -- No completion popup while typing. Ctrl+Space still opens it on demand
-  -- (buffer words and file paths only, since no language server runs).
+  -- No completion popup while typing until `:lsp` turns it on.
+  -- Ctrl+Space opens it on demand either way.
   {
     "hrsh7th/nvim-cmp",
     opts = { completion = { autocomplete = false } },
