@@ -1,0 +1,28 @@
+#!/usr/bin/env zsh
+# Split the focused herdr pane along its longer axis, like kitty's
+# `launch --location=split`: wide pane -> new pane to the right, tall pane ->
+# new pane below. Focus moves to the new pane so repeated presses tile.
+#
+# Bound via [[keys.command]] in ~/.config/herdr/config.toml; herdr supplies
+# HERDR_ACTIVE_PANE_ID and HERDR_SOCKET_PATH to custom commands.
+# Terminal cells are ~2:1 (tall), so compare width against 2*height.
+
+emulate -L zsh
+setopt pipefail
+
+pane=${HERDR_ACTIVE_PANE_ID:-}
+if [[ -z $pane ]]; then
+  pane=$(herdr pane layout | jq -r '.result.layout.focused_pane_id') || exit 1
+fi
+
+read -r w h < <(herdr pane layout --pane "$pane" \
+  | jq -r --arg p "$pane" '.result.layout.panes[] | select(.pane_id == $p) | "\(.rect.width) \(.rect.height)"') || exit 1
+[[ -n $w && -n $h ]] || exit 1
+
+if (( w >= 2 * h )); then
+  dir=right
+else
+  dir=down
+fi
+
+exec herdr pane split --pane "$pane" --direction "$dir" --focus >/dev/null

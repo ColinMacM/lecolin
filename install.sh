@@ -2,8 +2,10 @@
 # Linux, macOS and WSL installer. (Native Windows: run install.ps1 instead.)
 #
 # 1. Installs the tools these configs use, only if missing: zsh, git, curl,
-#    ripgrep, unzip, neovim, kitty, zoxide, pay-respects, nvm + node LTS,
-#    oh-my-zsh, zsh-autosuggestions, omp.
+#    ripgrep, unzip, jq, neovim, kitty, zoxide, pay-respects, nvm + node LTS,
+#    oh-my-zsh, zsh-autosuggestions, omp, bun, uv, and herdr (built from
+#    source with the patches in herdr/patches) with its omp integration and
+#    plugins.
 # 2. Symlinks the configs into place.
 #
 # Safe to re-run. Anything already at a target path that is not our symlink is
@@ -18,7 +20,7 @@ ARCH="$(uname -m)"        # x86_64 | aarch64 | arm64
 IS_WSL=0; grep -qi microsoft /proc/version 2>/dev/null && IS_WSL=1
 LOCAL_BIN="$HOME/.local/bin"
 mkdir -p "$LOCAL_BIN"
-export PATH="$LOCAL_BIN:$PATH"
+export PATH="$LOCAL_BIN:$HOME/.cargo/bin:$HOME/.bun/bin:$PATH"
 
 have() { command -v "$1" >/dev/null 2>&1; }
 say()  { printf '%-8s %s\n' "$1" "$2"; }
@@ -59,7 +61,7 @@ pkg_install() {
 
 install_tools() {
   local want=() t
-  for t in zsh git curl unzip; do have "$t" || want+=("$t"); done
+  for t in zsh git curl unzip jq; do have "$t" || want+=("$t"); done
   have rg || want+=(ripgrep)
   [ ${#want[@]} -gt 0 ] && pkg_install "${want[@]}"
 
@@ -107,9 +109,56 @@ install_tools() {
     . "$HOME/.nvm/nvm.sh" && nvm install --lts && nvm alias default 'lts/*'
   else say ok nvm; fi
 
+  # bun (peer-mail, Collie) and uv (peer-mail's swarm view). Their installers
+  # would append to ~/.zshrc, which is this repo's file and already sets them up.
+  if have bun; then say ok bun; else curl -fsSL https://bun.sh/install | SHELL=/bin/sh bash; fi
+  if have uv; then say ok uv; else curl -LsSf https://astral.sh/uv/install.sh | env UV_NO_MODIFY_PATH=1 sh; fi
+
+  install_herdr
+
   clone https://github.com/ohmyzsh/ohmyzsh.git "$HOME/.oh-my-zsh"
   clone https://github.com/zsh-users/zsh-autosuggestions \
     "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/zsh-autosuggestions"
+}
+
+# herdr: upstream at the release in herdr/version plus the local patches in
+# herdr/patches, built with cargo. An existing herdr or source checkout is left
+# alone (README, herdr, says how to rebuild one).
+HERDR_SRC="$HOME/Apps/herdr"
+install_herdr() {
+  if have herdr; then say ok "herdr ($(herdr --version))"; return; fi
+  if [ -e "$HERDR_SRC" ]; then say skip "herdr: $HERDR_SRC exists, build it there"; return; fi
+  local version
+  read -r version < "$REPO/herdr/version"
+  if [ "$OS" = Linux ] && ! have cc; then pkg_install gcc; fi
+  if ! have cargo; then
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
+  fi
+  git clone --depth=1 --branch "v$version" https://github.com/ogulcancelik/herdr "$HERDR_SRC"
+  git -C "$HERDR_SRC" switch -c colin/ui-fork
+  git -C "$HERDR_SRC" -c user.name=lecolin -c user.email=lecolin@localhost am "$REPO"/herdr/patches/*.patch
+  cargo install --locked --path "$HERDR_SRC"
+}
+
+# After the links: herdr's omp integration (writes its extension into
+# ~/.omp/agent/extensions) and the herdr plugins, each only if missing.
+setup_herdr() {
+  have herdr || { say skip "herdr setup (no herdr)"; return; }
+  if ! have omp; then
+    say skip "herdr omp integration (no omp)"
+  elif grep -q '^omp: current' <(herdr integration status 2>/dev/null); then
+    say ok "herdr omp integration"
+  else
+    herdr integration install omp
+  fi
+  local plugin
+  for plugin in AltanS/collie StructuPath/herdr-swarm; do
+    if grep -q "\"repo\": \"${plugin#*/}\"" "$HOME/.config/herdr/plugins.json" 2>/dev/null; then
+      say ok "herdr plugin $plugin"
+    else
+      herdr plugin install "$plugin" --yes
+    fi
+  done
 }
 
 [ "${1:-}" = --no-tools ] || install_tools
@@ -121,7 +170,15 @@ link kitty/ssh.conf      "$HOME/.config/kitty/ssh.conf"
 link kitty/current-theme.conf "$HOME/.config/kitty/current-theme.conf"
 link kitty/scrollback.lua     "$HOME/.config/kitty/scrollback.lua"
 link kitty/os-macos.conf      "$HOME/.config/kitty/os-macos.conf"
-link bin/kitty-new-tab   "$LOCAL_BIN/kitty-new-tab"
+link kitty/herdr_tab.py       "$HOME/.config/kitty/herdr_tab.py"
+link kitty/herdr-themes       "$HOME/.config/kitty/herdr-themes"
+link herdr/config.toml        "$HOME/.config/herdr/config.toml"
+link herdr/theme-overrides    "$HOME/.config/herdr/theme-overrides"
+link herdr/plugins/structupath.swarm/presets.conf \
+  "$HOME/.config/herdr/plugins/config/structupath.swarm/presets.conf"
+for script in herdr-smart-split herdr-theme herdr-collie-themes; do
+  link "bin/$script" "$LOCAL_BIN/$script"
+done
 link omp/config.yml     "$HOME/.omp/agent/config.yml"
 link omp/mcp.json       "$HOME/.omp/agent/mcp.json"
 for skill in "$REPO"/omp/skills/*; do
@@ -131,6 +188,8 @@ for skill in "$REPO"/omp/skills/*; do
   link "omp/skills/$name" "$HOME/.omp/agent/skills/$name" \
     "$HOME/.omp/agent/skills.pre-lecolin.$STAMP/$name"
 done
+
+[ "${1:-}" = --no-tools ] || setup_herdr
 
 echo
 if [ "$(basename "${SHELL:-}")" != zsh ]; then

@@ -1,0 +1,60 @@
+onboarding = false
+
+[theme]
+# Managed by ~/.local/bin/herdr-theme <name> (prefix+t cycles): it sets this,
+# the [theme.custom] table (whitby only), and the colors of the kitty window
+# herdr runs in. Other kitty tabs keep kitty's own theme.
+name = "solarized"
+auto_switch = false
+
+[ui]
+# prefix+left on the leftmost pane moves into the spaces sidebar (navigate mode).
+sidebar_on_left_edge = true
+tab_bar_right = [{ type = "text", text = "herdr" }]
+window_title = "herdr: {workspace}"
+# Distinct colored status glyphs (◐ working, ✓ done, × blocked, ○ idle).
+status_indicators = "symbols"
+
+# Each space: its status symbol, a folder icon in the theme's accent, its name.
+# row_gap = 1 leaves a blank line between entries so the lists breathe.
+[ui.sidebar.spaces]
+row_gap = 1
+rows = [
+  ["state_icon", "icon:\uF07B", "workspace"],
+  ["branch", "git_status"],
+]
+
+[ui.sidebar.agents]
+row_gap = 1
+
+# Move between tiled panes with prefix (ctrl+b) + arrows; h/j/k/l still work.
+[keys]
+focus_pane_left  = ["prefix+h", "prefix+left"]
+focus_pane_down  = ["prefix+j", "prefix+down"]
+focus_pane_up    = ["prefix+k", "prefix+up"]
+focus_pane_right = ["prefix+l", "prefix+right"]
+
+# Navigate mode (prefix+w): vim keys. j/k move through the spaces list like the
+# arrows; h/l move to the pane left/right; shift+j/shift+k to the pane below/above.
+navigate_workspace_down = ["down", "j"]
+navigate_workspace_up   = ["up", "k"]
+navigate_pane_left      = "h"
+navigate_pane_right     = "l"
+navigate_pane_down      = "shift+j"
+navigate_pane_up        = "shift+k"
+
+# Smart split (like kitty's ctrl+shift+enter): right if the pane is wide,
+# down if tall; focus follows the new pane. Script: ~/.local/bin/herdr-smart-split
+# kitty owns ctrl+shift+enter itself, so use ctrl+alt+enter (direct) or prefix+enter.
+[[keys.command]]
+key = ["ctrl+alt+enter", "prefix+enter"]
+type = "shell"
+command = '"$HOME/.local/bin/herdr-smart-split"'  # shell commands run through `/bin/sh -lc`
+description = "smart split (right if wide, down if tall)"
+
+# Cycle herdr's theme (and its own kitty window's colors). Script: ~/.local/bin/herdr-theme
+[[keys.command]]
+key = "prefix+t"
+type = "shell"
+command = '"$HOME/.local/bin/herdr-theme" next'
+description = "next herdr theme (herdr's window only)"

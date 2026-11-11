@@ -1,0 +1,1116 @@
+From 0ca7c74f5a681ae8cf55350accd1afb9a415932c Mon Sep 17 00:00:00 2001
+From: colin <colin@localhost>
+Date: Mon, 9 Nov 2026 15:48:06 -0800
+Subject: [PATCH 1/3] local: sidebar_on_left_edge, rounded corners, pill tabs,
+ chrome color glides
+
+---
+ src/client/mod.rs                             |   3 +-
+ src/client/shell.rs                           |   1 +
+ src/client/shell/actions.rs                   |  47 ++-
+ src/client/shell/composition.rs               |  57 ++++
+ src/client/shell/config.rs                    |   4 +
+ src/client/shell/endpoint_sidebar.rs          |   6 +-
+ src/client/shell/motion.rs                    | 290 ++++++++++++++++++
+ src/client/shell/notifications.rs             |   1 +
+ src/client/shell/overlays.rs                  |   8 +-
+ src/client/shell/render.rs                    |  11 +-
+ src/client/shell/sidebar.rs                   |  37 ++-
+ src/client/shell/state.rs                     |  18 ++
+ src/client/shell/tabs.rs                      |  67 +++-
+ .../shell/tests/workspace_navigation.rs       |  80 +++++
+ src/client/shell/worktrees.rs                 |   1 +
+ src/config/model.rs                           |   7 +
+ src/main.rs                                   |   8 +
+ src/ui/panes.rs                               |   9 +-
+ src/ui/status.rs                              |   1 +
+ 19 files changed, 614 insertions(+), 42 deletions(-)
+ create mode 100644 src/client/shell/motion.rs
+
+diff --git a/src/client/mod.rs b/src/client/mod.rs
+index f55db195..ca0ceb69 100644
+--- a/src/client/mod.rs
++++ b/src/client/mod.rs
+@@ -2325,7 +2325,8 @@ async fn run_client_loop(
+                         outcome.repaint |= notification_repaint
+                             | shell.tick_copy_feedback(now)
+                             | shell.tick_workspace_highlight(now)
+-                            | shell.tick_endpoint_error(now);
++                            | shell.tick_endpoint_error(now)
++                            | shell.tick_chrome_motion(now);
+                         let frame = outcome
+                             .repaint
+                             .then(|| shell.compose(state.reported_size.0, state.reported_size.1))
+diff --git a/src/client/shell.rs b/src/client/shell.rs
+index 2d180443..b1424020 100644
+--- a/src/client/shell.rs
++++ b/src/client/shell.rs
+@@ -23,6 +23,7 @@ mod input;
+ mod input_source;
+ mod link_hover;
+ mod mobile;
++mod motion;
+ mod mouse;
+ mod notification_policy;
+ mod notifications;
+diff --git a/src/client/shell/actions.rs b/src/client/shell/actions.rs
+index 83819b0d..e55ca724 100644
+--- a/src/client/shell/actions.rs
++++ b/src/client/shell/actions.rs
+@@ -149,12 +149,7 @@ impl ClientShellState {
+                     return;
+                 }
+                 if action == crate::input::KeybindAction::WorkspacePicker {
+-                    self.pending_workspace_highlight = None;
+-                    self.mobile_switcher_scroll = 0;
+-                    self.reveal_mobile_workspace = false;
+-                    self.mode = ClientShellMode::Navigate;
+-                    self.navigate_workspace_id = self.focused_navigation_target();
+-                    self.reveal_navigation_workspace = true;
++                    self.enter_navigate_mode();
+                     outcome.repaint = true;
+                     return;
+                 }
+@@ -173,7 +168,15 @@ impl ClientShellState {
+                     return;
+                 }
+                 if let Some(method) = self.endpoint_method_for_action(action) {
+-                    self.push_endpoint_method(method, outcome);
++                    let kind = match &method {
++                        crate::api::schema::Method::PaneFocusDirection(params) => {
++                            PendingEndpointKind::PaneFocusDirection {
++                                direction: params.direction,
++                            }
++                        }
++                        _ => PendingEndpointKind::Generic,
++                    };
++                    self.push_endpoint_method_with_kind(method, kind, outcome);
+                     return;
+                 }
+                 outcome.actions.push(ClientShellAction::Keybind(action));
+@@ -302,6 +305,16 @@ impl ClientShellState {
+         );
+     }
+ 
++    /// Enter navigate mode (the sidebar) with the cursor on the focused workspace.
++    pub(super) fn enter_navigate_mode(&mut self) {
++        self.pending_workspace_highlight = None;
++        self.mobile_switcher_scroll = 0;
++        self.reveal_mobile_workspace = false;
++        self.mode = ClientShellMode::Navigate;
++        self.navigate_workspace_id = self.focused_navigation_target();
++        self.reveal_navigation_workspace = true;
++    }
++
+     pub(super) fn push_endpoint_method(
+         &mut self,
+         method: crate::api::schema::Method,
+@@ -614,6 +627,26 @@ impl ClientShellState {
+                     }
+                 };
+             }
++            PendingEndpointKind::PaneFocusDirection { direction } => {
++                // Left edge with nowhere to go: hand focus to the sidebar when enabled.
++                let at_left_edge = matches!(
++                    &result,
++                    Ok(crate::api::schema::ResponseResult::PaneFocusDirection { focus })
++                        if !focus.changed
++                            && focus.reason
++                                == Some(crate::api::schema::PaneFocusDirectionReason::NoNeighbor)
++                );
++                if self.config.sidebar_on_left_edge
++                    && direction == crate::api::schema::PaneDirection::Left
++                    && at_left_edge
++                    && self.mode == ClientShellMode::Terminal
++                    && self.overlay.is_none()
++                {
++                    self.enter_navigate_mode();
++                    return (true, Vec::new());
++                }
++                return (false, Vec::new());
++            }
+             PendingEndpointKind::PopupCommand => {
+                 return match result {
+                     Ok(_) => {
+diff --git a/src/client/shell/composition.rs b/src/client/shell/composition.rs
+index b7ab4a96..ecf4b7d0 100644
+--- a/src/client/shell/composition.rs
++++ b/src/client/shell/composition.rs
+@@ -1,5 +1,49 @@
+ use super::*;
+ 
++/// Points the chrome glides at this frame's resting colors: the focused
++/// workspace's tabs and every space row. A target that moved since the last
++/// frame starts a glide from what is on screen.
++fn aim_chrome_motion(
++    motion: &mut super::motion::ChromeMotion,
++    snapshot: &ClientShellSnapshot,
++    config: &ClientShellConfig,
++    navigating: bool,
++    now: std::time::Instant,
++) {
++    use super::motion::{MotionKey, MotionTarget};
++    let palette = &config.palette;
++    let animate = config.animations;
++    motion.begin_pass();
++    for tab in snapshot
++        .tabs
++        .iter()
++        .filter(|tab| Some(tab.workspace_id.as_str()) == snapshot.focused_workspace_id.as_deref())
++    {
++        let (text, fill) = render::tab_colors(palette, tab.focused, tab.custom_label);
++        motion.aim(
++            MotionKey::new(MotionTarget::TabFill, &tab.tab_id),
++            fill,
++            now,
++            animate,
++        );
++        motion.aim(
++            MotionKey::new(MotionTarget::TabText, &tab.tab_id),
++            text,
++            now,
++            animate,
++        );
++    }
++    for workspace in &snapshot.workspaces {
++        motion.aim(
++            MotionKey::new(MotionTarget::WorkspaceFill, &workspace.workspace_id),
++            render::workspace_row_fill(palette, workspace.focused, navigating),
++            now,
++            animate,
++        );
++    }
++    motion.end_pass();
++}
++
+ fn restore_mode_bar(
+     frame: &mut FrameData,
+     bar: Option<Rect>,
+@@ -77,6 +121,8 @@ impl ClientShellState {
+             reveal_navigation_workspace: &mut self.reveal_navigation_workspace,
+             dragged_workspace_id: None,
+             workspace_drop_indicator_row: None,
++            motion: &self.chrome_motion,
++            now: std::time::Instant::now(),
+         };
+         if let Some(snapshot) = local_snapshot {
+             render::render_sidebar(
+@@ -204,6 +250,14 @@ impl ClientShellState {
+             ),
+             _ => (None, None),
+         };
++        let now = std::time::Instant::now();
++        aim_chrome_motion(
++            &mut self.chrome_motion,
++            snapshot,
++            &self.config,
++            valid_navigation_target || pending_workspace_highlight.is_some(),
++            now,
++        );
+         let mut buffer = Buffer::empty(Rect::new(0, 0, cols, rows));
+         self.hits = render::render_shell(
+             &mut buffer,
+@@ -233,6 +287,8 @@ impl ClientShellState {
+                 reveal_navigation_workspace: &mut self.reveal_navigation_workspace,
+                 dragged_workspace_id,
+                 workspace_drop_indicator_row,
++                motion: &self.chrome_motion,
++                now,
+             },
+         );
+         self.hits.panes = surface
+@@ -569,6 +625,7 @@ impl ClientShellState {
+                 let mut composed = frame.to_ratatui_buffer()?;
+                 let block = ratatui::widgets::Block::default()
+                     .borders(ratatui::widgets::Borders::ALL)
++                    .border_type(ratatui::widgets::BorderType::Rounded)
+                     .border_style(ratatui::style::Style::default().fg(self.config.palette.accent))
+                     .title(popup.title.clone())
+                     .style(ratatui::style::Style::default().bg(self.config.palette.panel_bg));
+diff --git a/src/client/shell/config.rs b/src/client/shell/config.rs
+index 04a3ddb5..524e65e5 100644
+--- a/src/client/shell/config.rs
++++ b/src/client/shell/config.rs
+@@ -125,6 +125,7 @@ impl ClientShellConfig {
+             agents: config.ui.sidebar.agents.clone(),
+             agent_panel_sort: config.ui.agent_panel_sort,
+             status_indicators: config.ui.status_indicators,
++            animations: config.ui.animations,
+             sound_enabled: config.ui.sound.enabled,
+             toast_delivery: config.ui.toast.delivery,
+             toast_delay_seconds: config.ui.toast.delay_seconds,
+@@ -146,6 +147,7 @@ impl ClientShellConfig {
+             keybinding_source: ClientShellKeybindingSource::Local,
+             prompt_new_tab_name: config.ui.prompt_new_tab_name,
+             prompt_new_workspace_name: config.ui.prompt_new_workspace_name,
++            sidebar_on_left_edge: config.ui.sidebar_on_left_edge,
+             confirm_close: config.ui.confirm_close,
+             mouse_capture: config.ui.mouse_capture,
+             mouse_scroll_lines: config.ui.mouse_scroll_lines(),
+@@ -352,6 +354,7 @@ impl ClientShellConfig {
+                 self.agents = ui.sidebar.agents.clone();
+                 self.agent_panel_sort = ui.agent_panel_sort;
+                 self.status_indicators = ui.status_indicators;
++                self.animations = ui.animations;
+                 self.sound_enabled = ui.sound.enabled;
+                 self.toast_delivery = ui.toast.delivery;
+                 self.toast_delay_seconds = ui.toast.delay_seconds;
+@@ -361,6 +364,7 @@ impl ClientShellConfig {
+                 self.clipboard_toast_position = ui.toast.clipboard.position;
+                 self.prompt_new_tab_name = ui.prompt_new_tab_name;
+                 self.prompt_new_workspace_name = ui.prompt_new_workspace_name;
++                self.sidebar_on_left_edge = ui.sidebar_on_left_edge;
+                 self.confirm_close = ui.confirm_close;
+                 self.mouse_capture = ui.mouse_capture;
+                 self.mouse_scroll_lines = ui.mouse_scroll_lines();
+diff --git a/src/client/shell/endpoint_sidebar.rs b/src/client/shell/endpoint_sidebar.rs
+index 96982487..bccd9c7c 100644
+--- a/src/client/shell/endpoint_sidebar.rs
++++ b/src/client/shell/endpoint_sidebar.rs
+@@ -477,8 +477,12 @@ pub(super) fn render_expanded(
+                     tokens,
+                     endpoint_active && workspace.focused,
+                     selected,
+-                    state.selected_workspace_id.is_some(),
+                     false,
++                    super::sidebar::workspace_row_fill(
++                        palette,
++                        endpoint_active && workspace.focused,
++                        state.selected_workspace_id.is_some(),
++                    ),
+                     palette,
+                 );
+                 if endpoint.status != ClientEndpointStatus::Online {
+diff --git a/src/client/shell/motion.rs b/src/client/shell/motion.rs
+new file mode 100644
+index 00000000..51677daf
+--- /dev/null
++++ b/src/client/shell/motion.rs
+@@ -0,0 +1,290 @@
++//! Color glides for client chrome: the active tab and the active space row ease
++//! between fills instead of switching in one frame.
++//!
++//! Each tracked color is a critically damped spring (damping ratio 1, no
++//! overshoot) per RGB channel. Retargeting keeps the color and velocity that
++//! are on screen, so a glide interrupted by another focus change bends toward
++//! the new fill without a jump. Colors that are not RGB (terminal palette
++//! entries, `reset`) switch at once.
++
++use std::collections::HashMap;
++use std::hash::{Hash, Hasher};
++use std::time::{Duration, Instant};
++
++use ratatui::style::Color;
++
++/// Time for a glide to cover most of its distance (Apple's spring "response").
++const RESPONSE: Duration = Duration::from_millis(220);
++/// Frame spacing while anything moves.
++pub(super) const FRAME_INTERVAL: Duration = Duration::from_millis(16);
++/// A glide has landed once every channel is this close to its target (0..=255 units).
++const SETTLE_DISTANCE: f32 = 0.5;
++/// ... and moving slower than this (units per second).
++const SETTLE_SPEED: f32 = 4.0;
++
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
++pub(super) enum MotionTarget {
++    TabFill,
++    TabText,
++    WorkspaceFill,
++}
++
++/// A tracked color: what it belongs to plus a hash of that element's id, so
++/// looking one up never allocates.
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
++pub(super) struct MotionKey {
++    target: MotionTarget,
++    id: u64,
++}
++
++impl MotionKey {
++    pub(super) fn new(target: MotionTarget, id: &str) -> Self {
++        let mut hasher = std::collections::hash_map::DefaultHasher::new();
++        id.hash(&mut hasher);
++        Self {
++            target,
++            id: hasher.finish(),
++        }
++    }
++}
++
++#[derive(Debug, Clone, Copy)]
++struct Spring {
++    origin: Instant,
++    /// Displacement from the target at `origin`, per channel.
++    offset: [f32; 3],
++    /// Velocity at `origin`, per channel, in units per second.
++    velocity: [f32; 3],
++}
++
++impl Spring {
++    fn omega() -> f32 {
++        std::f32::consts::TAU / RESPONSE.as_secs_f32()
++    }
++
++    /// Critically damped: x(t) = (x0 + (v0 + w*x0) t) e^(-w t).
++    fn state(&self, now: Instant) -> ([f32; 3], [f32; 3]) {
++        let w = Self::omega();
++        let t = now.saturating_duration_since(self.origin).as_secs_f32();
++        let decay = (-w * t).exp();
++        let mut offset = [0.0; 3];
++        let mut velocity = [0.0; 3];
++        for c in 0..3 {
++            let a = self.offset[c];
++            let b = self.velocity[c] + w * a;
++            offset[c] = (a + b * t) * decay;
++            velocity[c] = (b - w * (a + b * t)) * decay;
++        }
++        (offset, velocity)
++    }
++
++    fn settled(&self, now: Instant) -> bool {
++        let (offset, velocity) = self.state(now);
++        offset.iter().all(|x| x.abs() < SETTLE_DISTANCE)
++            && velocity.iter().all(|v| v.abs() < SETTLE_SPEED)
++    }
++}
++
++#[derive(Debug, Clone, Copy)]
++struct Track {
++    target: Color,
++    spring: Option<Spring>,
++    seen: u64,
++}
++
++impl Track {
++    fn presented(&self, now: Instant) -> Color {
++        let (Some(spring), Some(target)) = (self.spring, rgb(self.target)) else {
++            return self.target;
++        };
++        let (offset, _) = spring.state(now);
++        let channel = |c: usize| (target[c] + offset[c]).round().clamp(0.0, 255.0) as u8;
++        Color::Rgb(channel(0), channel(1), channel(2))
++    }
++}
++
++fn rgb(color: Color) -> Option<[f32; 3]> {
++    match color {
++        Color::Rgb(r, g, b) => Some([f32::from(r), f32::from(g), f32::from(b)]),
++        _ => None,
++    }
++}
++
++#[derive(Debug, Default)]
++pub(crate) struct ChromeMotion {
++    tracks: HashMap<MotionKey, Track>,
++    generation: u64,
++}
++
++impl ChromeMotion {
++    /// Starts a pass over the chrome; tracks not aimed again before `end_pass`
++    /// belong to elements that are gone and are dropped.
++    pub(super) fn begin_pass(&mut self) {
++        self.generation = self.generation.wrapping_add(1);
++    }
++
++    pub(super) fn end_pass(&mut self) {
++        let generation = self.generation;
++        self.tracks.retain(|_, track| track.seen == generation);
++    }
++
++    /// Points `key` at `target`. The first sighting of an element shows its
++    /// color at once; a changed target glides from the color on screen now,
++    /// keeping the current velocity.
++    pub(super) fn aim(&mut self, key: MotionKey, target: Color, now: Instant, animate: bool) {
++        let generation = self.generation;
++        let Some(track) = self.tracks.get_mut(&key) else {
++            self.tracks.insert(
++                key,
++                Track {
++                    target,
++                    spring: None,
++                    seen: generation,
++                },
++            );
++            return;
++        };
++        track.seen = generation;
++        if track.target == target {
++            return;
++        }
++        let presented = rgb(track.presented(now));
++        let velocity = track
++            .spring
++            .map(|spring| spring.state(now).1)
++            .unwrap_or([0.0; 3]);
++        track.target = target;
++        track.spring = match (animate, presented, rgb(target)) {
++            (true, Some(from), Some(to)) => Some(Spring {
++                origin: now,
++                offset: [from[0] - to[0], from[1] - to[1], from[2] - to[2]],
++                velocity,
++            }),
++            _ => None,
++        };
++    }
++
++    /// The color to draw for `key` now, or `fallback` for an untracked element.
++    pub(super) fn color(&self, key: MotionKey, fallback: Color, now: Instant) -> Color {
++        self.tracks
++            .get(&key)
++            .map_or(fallback, |track| track.presented(now))
++    }
++
++    pub(super) fn is_moving(&self) -> bool {
++        self.tracks.values().any(|track| track.spring.is_some())
++    }
++
++    /// Lands settled glides. True while anything was moving, so the frame that
++    /// lands the last glide is drawn too.
++    pub(super) fn tick(&mut self, now: Instant) -> bool {
++        let mut moving = false;
++        for track in self.tracks.values_mut() {
++            if let Some(spring) = track.spring {
++                moving = true;
++                if spring.settled(now) {
++                    track.spring = None;
++                }
++            }
++        }
++        moving
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    const GREY: Color = Color::Rgb(240, 240, 243);
++    const BLUE: Color = Color::Rgb(36, 108, 244);
++
++    fn key() -> MotionKey {
++        MotionKey::new(MotionTarget::TabFill, "tab-1")
++    }
++
++    fn aimed(motion: &mut ChromeMotion, target: Color, now: Instant, animate: bool) {
++        motion.begin_pass();
++        motion.aim(key(), target, now, animate);
++        motion.end_pass();
++    }
++
++    #[test]
++    fn first_sighting_shows_target_without_motion() {
++        let mut motion = ChromeMotion::default();
++        let now = Instant::now();
++        aimed(&mut motion, BLUE, now, true);
++        assert_eq!(motion.color(key(), GREY, now), BLUE);
++        assert!(!motion.is_moving());
++    }
++
++    #[test]
++    fn retarget_glides_monotonically_without_overshoot_and_lands() {
++        let mut motion = ChromeMotion::default();
++        let start = Instant::now();
++        aimed(&mut motion, GREY, start, true);
++        aimed(&mut motion, BLUE, start, true);
++        assert_eq!(motion.color(key(), GREY, start), GREY);
++
++        let mut previous_red = 240;
++        for ms in (0..=400).step_by(8) {
++            let Color::Rgb(red, _, _) =
++                motion.color(key(), GREY, start + Duration::from_millis(ms))
++            else {
++                panic!("rgb glide");
++            };
++            assert!(
++                red <= previous_red,
++                "red rose at {ms} ms: {previous_red} -> {red}"
++            );
++            assert!(red >= 36, "overshot past the target at {ms} ms");
++            previous_red = red;
++        }
++        let landed = start + Duration::from_millis(400);
++        assert_eq!(motion.color(key(), GREY, landed), BLUE);
++        assert!(motion.tick(landed), "the landing frame is still drawn");
++        assert!(!motion.is_moving());
++        assert!(!motion.tick(landed), "nothing left to draw once landed");
++    }
++
++    #[test]
++    fn interrupting_a_glide_starts_from_the_color_on_screen() {
++        let mut motion = ChromeMotion::default();
++        let start = Instant::now();
++        aimed(&mut motion, GREY, start, true);
++        aimed(&mut motion, BLUE, start, true);
++        let midway = start + Duration::from_millis(60);
++        let on_screen = motion.color(key(), GREY, midway);
++        assert_ne!(on_screen, GREY);
++        assert_ne!(on_screen, BLUE);
++
++        aimed(&mut motion, GREY, midway, true);
++        assert_eq!(
++            motion.color(key(), GREY, midway),
++            on_screen,
++            "reversing must not jump"
++        );
++    }
++
++    #[test]
++    fn disabled_or_non_rgb_targets_switch_at_once() {
++        let mut motion = ChromeMotion::default();
++        let now = Instant::now();
++        aimed(&mut motion, GREY, now, false);
++        aimed(&mut motion, BLUE, now, false);
++        assert_eq!(motion.color(key(), GREY, now), BLUE);
++
++        aimed(&mut motion, Color::Reset, now, true);
++        assert_eq!(motion.color(key(), GREY, now), Color::Reset);
++        assert!(!motion.is_moving());
++    }
++
++    #[test]
++    fn elements_not_aimed_in_a_pass_are_forgotten() {
++        let mut motion = ChromeMotion::default();
++        let now = Instant::now();
++        aimed(&mut motion, BLUE, now, true);
++        motion.begin_pass();
++        motion.end_pass();
++        assert_eq!(motion.color(key(), GREY, now), GREY);
++    }
++}
+diff --git a/src/client/shell/notifications.rs b/src/client/shell/notifications.rs
+index b8437ea7..a9a58499 100644
+--- a/src/client/shell/notifications.rs
++++ b/src/client/shell/notifications.rs
+@@ -144,6 +144,7 @@ pub(super) fn render_notification_card(
+     Clear.render(rect, buffer);
+     let block = Block::default()
+         .borders(Borders::ALL)
++        .border_type(ratatui::widgets::BorderType::Rounded)
+         .border_style(Style::default().fg(palette.overlay0))
+         .style(Style::default().bg(palette.panel_bg));
+     let inner = block.inner(rect);
+diff --git a/src/client/shell/overlays.rs b/src/client/shell/overlays.rs
+index f26cc6e4..51992e9a 100644
+--- a/src/client/shell/overlays.rs
++++ b/src/client/shell/overlays.rs
+@@ -237,9 +237,9 @@ fn panel(
+     for x in a.x..a.right() {
+         b[(x, a.y)]
+             .set_symbol(if x == a.x {
+-                "┌"
++                "╭"
+             } else if x + 1 == a.right() {
+-                "┐"
++                "╮"
+             } else {
+                 "─"
+             })
+@@ -247,9 +247,9 @@ fn panel(
+         let y = a.bottom() - 1;
+         b[(x, y)]
+             .set_symbol(if x == a.x {
+-                "└"
++                "╰"
+             } else if x + 1 == a.right() {
+-                "┘"
++                "╯"
+             } else {
+                 "─"
+             })
+diff --git a/src/client/shell/render.rs b/src/client/shell/render.rs
+index 248216c1..8935c1f6 100644
+--- a/src/client/shell/render.rs
++++ b/src/client/shell/render.rs
+@@ -10,8 +10,10 @@ mod tabs;
+ pub(super) use super::agent_sidebar::{ordered_agent_pane_ids, render_agent_panel};
+ pub(super) use super::aggregate_navigation::navigator_rows as client_navigator_rows;
+ pub(super) use overlays::{render_client_overlay, render_context_menu, render_global_menu};
+-pub(super) use sidebar::{render_collapsed_sidebar, render_sidebar, workspace_entries};
+-pub(super) use tabs::{render_tab_bar, tab_bar_status_width};
++pub(super) use sidebar::{
++    render_collapsed_sidebar, render_sidebar, workspace_entries, workspace_row_fill,
++};
++pub(super) use tabs::{render_tab_bar, tab_bar_status_width, tab_colors};
+ 
+ pub(in crate::client::shell) fn render_sidebar_background(
+     buffer: &mut Buffer,
+@@ -248,6 +250,9 @@ pub(super) struct ShellRenderState<'a> {
+     pub(super) reveal_navigation_workspace: &'a mut bool,
+     pub(super) dragged_workspace_id: Option<&'a str>,
+     pub(super) workspace_drop_indicator_row: Option<u16>,
++    /// Chrome color glides, read at `now`.
++    pub(super) motion: &'a super::motion::ChromeMotion,
++    pub(super) now: std::time::Instant,
+ }
+ 
+ pub(super) fn render_shell(
+@@ -318,6 +323,8 @@ pub(super) fn render_shell(
+             state.tab_scroll,
+             state.reveal_focused_tab,
+             state.tab_drag_insert_index,
++            state.motion,
++            state.now,
+             &mut hits,
+         );
+     }
+diff --git a/src/client/shell/sidebar.rs b/src/client/shell/sidebar.rs
+index 46c3a1a0..71696002 100644
+--- a/src/client/shell/sidebar.rs
++++ b/src/client/shell/sidebar.rs
+@@ -24,6 +24,19 @@ pub(in crate::client::shell) fn workspace_active_background(
+     }
+ }
+ 
++/// Resting fill of a space row in the expanded sidebar; glides ease between these.
++pub(in crate::client::shell) fn workspace_row_fill(
++    palette: &Palette,
++    focused: bool,
++    navigating: bool,
++) -> ratatui::style::Color {
++    if focused {
++        workspace_active_background(palette, navigating)
++    } else {
++        palette.sidebar_bg
++    }
++}
++
+ pub(in crate::client::shell) fn collapsed_sidebar_sections(
+     area: Rect,
+ ) -> (Rect, Option<u16>, Rect) {
+@@ -314,12 +327,22 @@ pub(crate) fn render_sidebar(
+             target.matches(state.active_endpoint_id, &workspace.workspace_id)
+         });
+         let dragged = state.dragged_workspace_id == Some(workspace.workspace_id.as_str());
++        // The focus fill eases in on the new row while it eases out of the old one.
++        let navigating = state.selected_workspace_id.is_some();
++        let focus_fill = state.motion.color(
++            super::motion::MotionKey::new(
++                super::motion::MotionTarget::WorkspaceFill,
++                &workspace.workspace_id,
++            ),
++            workspace_row_fill(palette, workspace.focused, navigating),
++            state.now,
++        );
+         if selected {
+             buffer.set_style(rect, Style::default().bg(palette.selection_bg));
+         } else if dragged {
+             buffer.set_style(rect, Style::default().bg(palette.surface1));
+-        } else if workspace.focused {
+-            buffer.set_style(rect, Style::default().bg(palette.active_row_bg));
++        } else if focus_fill != palette.sidebar_bg {
++            buffer.set_style(rect, Style::default().bg(focus_fill));
+         }
+         render_workspace_rows(
+             buffer,
+@@ -330,8 +353,8 @@ pub(crate) fn render_sidebar(
+             rows,
+             workspace.focused,
+             selected,
+-            state.selected_workspace_id.is_some(),
+             dragged,
++            focus_fill,
+             palette,
+         );
+         let group_toggle = render_parent_group_toggle(
+@@ -698,8 +721,10 @@ pub(in crate::client::shell) fn render_workspace_rows(
+     rows: Vec<Vec<crate::ui::ResolvedToken>>,
+     focused: bool,
+     selected: bool,
+-    navigating: bool,
+     dragged: bool,
++    // The row's focus fill as drawn now, mid-glide included (`workspace_row_fill`
++    // at rest); `sidebar_bg` means no fill.
++    focus_fill: ratatui::style::Color,
+     palette: &Palette,
+ ) {
+     for (row_index, row) in rows.iter().enumerate() {
+@@ -773,10 +798,8 @@ pub(in crate::client::shell) fn render_workspace_rows(
+         Some(workspace_selection_background(palette))
+     } else if dragged {
+         Some(palette.surface1)
+-    } else if focused {
+-        Some(workspace_active_background(palette, navigating))
+     } else {
+-        None
++        (focus_fill != palette.sidebar_bg).then_some(focus_fill)
+     };
+     if let Some(background) = background {
+         for y in area.y..area.bottom() {
+diff --git a/src/client/shell/state.rs b/src/client/shell/state.rs
+index 5a732920..69be9d99 100644
+--- a/src/client/shell/state.rs
++++ b/src/client/shell/state.rs
+@@ -25,6 +25,7 @@ pub(crate) struct ClientShellConfig {
+     pub(super) agents: crate::config::AgentsSidebarConfig,
+     pub(super) agent_panel_sort: crate::config::AgentPanelSortConfig,
+     pub(super) status_indicators: crate::config::StatusIndicatorStyle,
++    pub(super) animations: bool,
+     pub(super) sound_enabled: bool,
+     pub(super) toast_delivery: crate::config::ToastDelivery,
+     pub(super) toast_delay_seconds: u64,
+@@ -40,6 +41,7 @@ pub(crate) struct ClientShellConfig {
+     pub(super) keybinding_source: ClientShellKeybindingSource,
+     pub(super) prompt_new_tab_name: bool,
+     pub(super) prompt_new_workspace_name: bool,
++    pub(super) sidebar_on_left_edge: bool,
+     pub(super) confirm_close: bool,
+     pub(super) mouse_capture: bool,
+     pub(super) mouse_scroll_lines: usize,
+@@ -624,6 +626,9 @@ pub(super) enum PendingEndpointKind {
+         id: String,
+     },
+     ReleaseNotesDismiss,
++    PaneFocusDirection {
++        direction: crate::api::schema::PaneDirection,
++    },
+     PopupCommand,
+     ReloadConfig,
+     IntegrationList,
+@@ -895,6 +900,8 @@ pub(crate) struct ClientShellState {
+     pub(super) last_composed_size: Option<(u16, u16)>,
+     pub(super) last_composed_at: Option<std::time::Instant>,
+     pub(super) selection_repaint_deadline: Option<std::time::Instant>,
++    /// Color glides for the active tab and space row (presentation only).
++    pub(super) chrome_motion: super::motion::ChromeMotion,
+     pub(super) hits: ShellHitMap,
+     pub(super) endpoints: Vec<ClientShellEndpoint>,
+     pub(super) active_endpoint_id: ClientEndpointId,
+@@ -1069,6 +1076,7 @@ impl ClientShellState {
+             last_composed_size: None,
+             last_composed_at: None,
+             selection_repaint_deadline: None,
++            chrome_motion: super::motion::ChromeMotion::default(),
+             hits: ShellHitMap::default(),
+             endpoints: vec![local_endpoint()],
+             active_endpoint_id: ClientEndpointId::Local,
+@@ -1878,11 +1886,21 @@ impl ClientShellState {
+         false
+     }
+ 
++    /// Lands settled chrome glides; true while a glide still needs frames.
++    pub(crate) fn tick_chrome_motion(&mut self, now: std::time::Instant) -> bool {
++        self.chrome_motion.tick(now)
++    }
++
+     pub(crate) fn timer_delay(&self, now: std::time::Instant) -> std::time::Duration {
+         let default = std::time::Duration::from_millis(100);
++        let motion_frame = self
++            .chrome_motion
++            .is_moving()
++            .then(|| self.last_composed_at.unwrap_or(now) + super::motion::FRAME_INTERVAL);
+         self.selection_autoscroll_deadline
+             .into_iter()
+             .chain(self.selection_repaint_deadline)
++            .chain(motion_frame)
+             .min()
+             .map(|deadline| deadline.saturating_duration_since(now).min(default))
+             .unwrap_or(default)
+diff --git a/src/client/shell/tabs.rs b/src/client/shell/tabs.rs
+index 3fdcf7dc..0e0a6665 100644
+--- a/src/client/shell/tabs.rs
++++ b/src/client/shell/tabs.rs
+@@ -3,6 +3,25 @@ use super::*;
+ const TAB_SCROLL_BUTTON_WIDTH: u16 = 3;
+ const MIN_TAB_STRIP_WIDTH: u16 =
+     MIN_TAB_WIDTH + NEW_TAB_WIDTH + TAB_SCROLL_BUTTON_WIDTH.saturating_mul(2);
++/// Powerline half-circles (U+E0B6, U+E0B4): kitty and other modern terminals
++/// draw these themselves, so the rounded tab ends need no patched font.
++const TAB_CAP_LEFT: &str = "\u{e0b6}";
++const TAB_CAP_RIGHT: &str = "\u{e0b4}";
++
++/// Resting (text, fill) colors of a tab; glides ease between these.
++pub(in crate::client::shell) fn tab_colors(
++    palette: &Palette,
++    focused: bool,
++    custom_label: bool,
++) -> (ratatui::style::Color, ratatui::style::Color) {
++    if focused {
++        (panel_contrast_fg(palette), palette.accent)
++    } else if custom_label {
++        (palette.overlay1, palette.surface0)
++    } else {
++        (palette.overlay0, palette.surface0)
++    }
++}
+ 
+ pub(crate) fn render_tab_bar(
+     buffer: &mut Buffer,
+@@ -12,6 +31,8 @@ pub(crate) fn render_tab_bar(
+     tab_scroll: &mut usize,
+     reveal_focused_tab: &mut bool,
+     tab_drag_insert_index: Option<usize>,
++    motion: &super::motion::ChromeMotion,
++    now: std::time::Instant,
+     hits: &mut ShellHitMap,
+ ) {
+     let palette = &config.palette;
+@@ -24,8 +45,10 @@ pub(crate) fn render_tab_bar(
+     let desired_widths = tabs
+         .iter()
+         .map(|tab| {
+-            let label = tab_label(tab);
+-            display_width(&label).saturating_add(4).max(MIN_TAB_WIDTH)
++            let label = display_width(&tab_label(tab));
++            let width = label.saturating_add(4).max(MIN_TAB_WIDTH);
++            // Even padding keeps the label exactly centered between the pill caps.
++            width.saturating_add((width - label) % 2)
+         })
+         .collect::<Vec<_>>();
+     let content = tab_bar_content_area(snapshot, area);
+@@ -100,20 +123,21 @@ pub(crate) fn render_tab_bar(
+             break;
+         }
+         let rect = Rect::new(x, area.y, width, 1);
+-        let style = if tab.focused {
+-            let base = Style::default()
+-                .fg(panel_contrast_fg(palette))
+-                .bg(palette.accent);
+-            if tab.custom_label {
+-                base.add_modifier(Modifier::BOLD)
+-            } else {
+-                base
+-            }
+-        } else if tab.custom_label {
+-            Style::default().fg(palette.overlay1).bg(palette.surface0)
+-        } else {
+-            Style::default().fg(palette.overlay0).bg(palette.surface0)
+-        };
++        let (text_color, fill) = tab_colors(palette, tab.focused, tab.custom_label);
++        let fill = motion.color(
++            super::motion::MotionKey::new(super::motion::MotionTarget::TabFill, &tab.tab_id),
++            fill,
++            now,
++        );
++        let text_color = motion.color(
++            super::motion::MotionKey::new(super::motion::MotionTarget::TabText, &tab.tab_id),
++            text_color,
++            now,
++        );
++        let mut style = Style::default().fg(text_color).bg(fill);
++        if tab.focused && tab.custom_label {
++            style = style.add_modifier(Modifier::BOLD);
++        }
+         let padding = width.saturating_sub(display_width(&name));
+         let left = padding / 2;
+         let text = format!(
+@@ -123,6 +147,17 @@ pub(crate) fn render_tab_bar(
+             right_padding = padding.saturating_sub(left) as usize,
+         );
+         put_text(buffer, rect.x, rect.y, rect.width, &text, style);
++        // Round the ends into a pill. A full-width tab has two cells of padding
++        // per side, so the caps never cover the label; a clipped tab stays square.
++        if width == desired {
++            let cap = Style::default().fg(fill).bg(palette.panel_bg);
++            buffer[(rect.x, rect.y)]
++                .set_symbol(TAB_CAP_LEFT)
++                .set_style(cap);
++            buffer[(rect.right() - 1, rect.y)]
++                .set_symbol(TAB_CAP_RIGHT)
++                .set_style(cap);
++        }
+         hits.tabs.push((rect, tab.tab_id.clone()));
+         first_visible.get_or_insert(index);
+         last_visible = Some(index);
+diff --git a/src/client/shell/tests/workspace_navigation.rs b/src/client/shell/tests/workspace_navigation.rs
+index dff7f7d4..c8d65591 100644
+--- a/src/client/shell/tests/workspace_navigation.rs
++++ b/src/client/shell/tests/workspace_navigation.rs
+@@ -866,6 +866,86 @@ fn directional_pane_focus_releases_an_accepted_workspace_highlight() {
+     }
+ }
+ 
++#[test]
++fn focus_pane_left_at_left_edge_enters_navigate_mode_only_when_enabled() {
++    use crate::api::schema::{
++        Method, PaneDirection, PaneFocusDirectionReason, PaneFocusDirectionResult, PaneLayoutRect,
++        PaneLayoutSnapshot, ResponseResult,
++    };
++
++    let focus_result = |changed: bool| ResponseResult::PaneFocusDirection {
++        focus: PaneFocusDirectionResult {
++            changed,
++            reason: (!changed).then_some(PaneFocusDirectionReason::NoNeighbor),
++            source_pane_id: "pane_1".into(),
++            focused_pane_id: Some("pane_1".into()),
++            layout: PaneLayoutSnapshot {
++                workspace_id: "ws_1".into(),
++                tab_id: "tab_1".into(),
++                zoomed: false,
++                area: PaneLayoutRect {
++                    x: 0,
++                    y: 0,
++                    width: 80,
++                    height: 24,
++                },
++                focused_pane_id: "pane_1".into(),
++                panes: Vec::new(),
++                splits: Vec::new(),
++            },
++        },
++    };
++
++    // (enabled, key, direction, expect navigate)
++    for (enabled, key, direction, expect_navigate) in [
++        (true, b'h', PaneDirection::Left, true),
++        (false, b'h', PaneDirection::Left, false),
++        (true, b'l', PaneDirection::Right, false),
++        (true, b'k', PaneDirection::Up, false),
++    ] {
++        let mut state = local_navigation_state(false);
++        state.config.sidebar_on_left_edge = enabled;
++        preview_key(&mut state, &[0x02]);
++        let outcome = state.handle_input_bytes(&[key]);
++        let [ClientShellAction::Endpoint { request, .. }] = outcome.actions.as_slice() else {
++            panic!("expected a directional pane focus request");
++        };
++        let Method::PaneFocusDirection(params) = &request.method else {
++            panic!("expected PaneFocusDirection");
++        };
++        assert_eq!(params.direction, direction);
++        assert_eq!(state.mode, ClientShellMode::Terminal);
++
++        let (repaint, actions) =
++            state.handle_endpoint_result("boot-1", &request.id, Ok(focus_result(false)));
++        assert!(actions.is_empty());
++        assert_eq!(repaint, expect_navigate, "enabled={enabled} key={key}");
++        let expected_mode = if expect_navigate {
++            ClientShellMode::Navigate
++        } else {
++            ClientShellMode::Terminal
++        };
++        assert_eq!(state.mode, expected_mode, "enabled={enabled} key={key}");
++        if expect_navigate {
++            assert_eq!(
++                state.navigate_workspace_id,
++                state.navigation_target(&ClientEndpointId::Local, "ws_1")
++            );
++        }
++    }
++
++    // A neighbor that took focus never opens the sidebar.
++    let mut state = local_navigation_state(false);
++    state.config.sidebar_on_left_edge = true;
++    preview_key(&mut state, &[0x02]);
++    let outcome = state.handle_input_bytes(b"h");
++    let [ClientShellAction::Endpoint { request, .. }] = outcome.actions.as_slice() else {
++        panic!("expected a directional pane focus request");
++    };
++    state.handle_endpoint_result("boot-1", &request.id, Ok(focus_result(true)));
++    assert_eq!(state.mode, ClientShellMode::Terminal);
++}
++
+ #[test]
+ fn direct_agent_focus_repaints_when_releasing_a_workspace_highlight() {
+     let mut config = Config::default();
+diff --git a/src/client/shell/worktrees.rs b/src/client/shell/worktrees.rs
+index 56c554c8..30cd9940 100644
+--- a/src/client/shell/worktrees.rs
++++ b/src/client/shell/worktrees.rs
+@@ -529,6 +529,7 @@ impl ClientShellState {
+                 PendingEndpointKind::Generic
+                 | PendingEndpointKind::ProductAnnouncementDismiss { .. }
+                 | PendingEndpointKind::ReleaseNotesDismiss
++                | PendingEndpointKind::PaneFocusDirection { .. }
+                 | PendingEndpointKind::PopupCommand
+                 | PendingEndpointKind::ReloadConfig
+                 | PendingEndpointKind::IntegrationList
+diff --git a/src/config/model.rs b/src/config/model.rs
+index 29802fd9..223606c3 100644
+--- a/src/config/model.rs
++++ b/src/config/model.rs
+@@ -966,6 +966,9 @@ pub struct UiConfig {
+     pub prompt_new_tab_name: bool,
+     /// Ask for a workspace name before interactive creation. Default: false.
+     pub prompt_new_workspace_name: bool,
++    /// When focus_pane_left has no pane to the left, enter navigate mode
++    /// (the sidebar) instead of doing nothing. Default: false.
++    pub sidebar_on_left_edge: bool,
+     /// Draw borders around split panes. auto draws them only for split panes,
+     /// always also frames a lone pane (only while pane_outer_borders is
+     /// enabled, since every edge of a lone pane is an outer edge), off
+@@ -998,6 +1001,8 @@ pub struct UiConfig {
+     _legacy_agent_panel_scope: Option<LegacyAgentPanelScopeConfig>,
+     /// Agent status indicator style. Saved values are "dots" or "symbols". Default: "dots".
+     pub status_indicators: StatusIndicatorStyle,
++    /// Ease the active tab and space row between colors when focus moves. Default: true.
++    pub animations: bool,
+     /// Expanded sidebar row composition.
+     pub sidebar: SidebarConfig,
+     /// Accent color for highlights, borders, and navigation UI.
+@@ -1213,6 +1218,7 @@ impl Default for UiConfig {
+             confirm_close: true,
+             prompt_new_tab_name: true,
+             prompt_new_workspace_name: false,
++            sidebar_on_left_edge: false,
+             pane_borders: PaneBordersConfig::Auto,
+             pane_outer_borders: true,
+             pane_scrollbars: true,
+@@ -1226,6 +1232,7 @@ impl Default for UiConfig {
+             agent_panel_sort: AgentPanelSortConfig::Spaces,
+             _legacy_agent_panel_scope: None,
+             status_indicators: StatusIndicatorStyle::Dots,
++            animations: true,
+             sidebar: SidebarConfig::default(),
+             accent: "cyan".into(),
+             toast: ToastConfig::default(),
+diff --git a/src/main.rs b/src/main.rs
+index f97e7e2b..cc14468f 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -291,6 +291,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
+ # Ask for a workspace name before interactive creation.
+ # prompt_new_workspace_name = false
+ 
++# When focus_pane_left has no pane to the left, enter navigate mode (the
++# sidebar) instead of doing nothing.
++# sidebar_on_left_edge = false
++
+ # Draw borders around split panes.
+ # "auto" draws them only for split panes, "always" also frames a lone pane
+ # (only while pane_outer_borders is enabled), "off" disables them.
+@@ -340,6 +344,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
+ # distinct static glyphs for blocked, working, done, idle, and unknown states.
+ # status_indicators = "dots"
+ 
++# Ease the active tab and space row between colors when focus moves, with a
++# critically damped spring (no overshoot). false switches colors at once.
++# animations = true
++
+ # Accent color for highlights, borders, and navigation UI.
+ # Accepts: hex (#89b4fa), named colors (cyan, blue, magenta), or rgb(r,g,b)
+ # accent = "cyan"
+diff --git a/src/ui/panes.rs b/src/ui/panes.rs
+index 6a91f18a..c66cb4b9 100644
+--- a/src/ui/panes.rs
++++ b/src/ui/panes.rs
+@@ -795,10 +795,11 @@ fn line_cell_symbol(line: LineCell) -> &'static str {
+         (false, false, true, true) | (false, false, true, false) | (false, false, false, true) => {
+             "─"
+         }
+-        (false, true, false, true) => "┌",
+-        (false, true, true, false) => "┐",
+-        (true, false, false, true) => "└",
+-        (true, false, true, false) => "┘",
++        // Box corners are filleted; kitty and most terminals draw these as arcs.
++        (false, true, false, true) => "╭",
++        (false, true, true, false) => "╮",
++        (true, false, false, true) => "╰",
++        (true, false, true, false) => "╯",
+         _ => "",
+     }
+ }
+diff --git a/src/ui/status.rs b/src/ui/status.rs
+index d8371cdb..4b92232b 100644
+--- a/src/ui/status.rs
++++ b/src/ui/status.rs
+@@ -63,6 +63,7 @@ pub(crate) fn render_copy_feedback_buffer(
+     Clear.render(feedback_area, buffer);
+     let block = Block::default()
+         .borders(Borders::ALL)
++        .border_type(ratatui::widgets::BorderType::Rounded)
+         .border_style(Style::default().fg(palette.green))
+         .style(Style::default().bg(palette.panel_bg));
+     let inner = block.inner(feedback_area);
+-- 
+2.43.0
+

@@ -1,0 +1,407 @@
+From 23bf0b8f7852c4576e166aa2266718958e4e146f Mon Sep 17 00:00:00 2001
+From: colin <colin@localhost>
+Date: Mon, 9 Nov 2026 16:07:50 -0800
+Subject: [PATCH 2/3] local: icon sidebar token, + on spaces/agents headers,
+ wider pill tabs
+
+---
+ .../src/content/docs/configuration.mdx        |  2 +
+ src/client/shell/agent_sidebar.rs             |  9 +++
+ src/client/shell/mouse.rs                     | 11 +++-
+ src/client/shell/render.rs                    |  2 +
+ src/client/shell/sidebar.rs                   | 25 +++++++
+ src/client/shell/state.rs                     |  4 ++
+ src/client/shell/tabs.rs                      |  6 +-
+ src/config/sidebar.rs                         | 65 ++++++++++++++++++-
+ src/ui/sidebar.rs                             |  5 ++
+ src/ui/sidebar/tokens.rs                      | 21 ++++--
+ 10 files changed, 142 insertions(+), 8 deletions(-)
+
+diff --git a/docs/next/website/src/content/docs/configuration.mdx b/docs/next/website/src/content/docs/configuration.mdx
+index 874fe56c..af5a1dbe 100644
+--- a/docs/next/website/src/content/docs/configuration.mdx
++++ b/docs/next/website/src/content/docs/configuration.mdx
+@@ -391,6 +391,7 @@ Agent rows accept these built-in tokens:
+ - `terminal_title` — latest OSC 0/2 terminal title after safety normalization.
+ - `terminal_title_stripped` — the terminal title with one recognized leading activity or spinner glyph and its following whitespace removed.
+ - `$name` — custom pane metadata named `name`.
++- `icon:<glyph>` — a fixed glyph up to two cells wide, drawn in the accent color unless the token sets `fg`, followed by a single space.
+ 
+ Space rows accept these built-in tokens:
+ 
+@@ -400,6 +401,7 @@ Space rows accept these built-in tokens:
+ - `branch` — Git branch when available.
+ - `git_status` — Git ahead and behind counts when nonzero.
+ - `$name` — custom workspace metadata named `name`.
++- `icon:<glyph>` — a fixed glyph up to two cells wide, drawn in the accent color unless the token sets `fg`, followed by a single space.
+ 
+ Tokens render in their configured order. Herdr normally separates adjacent values with ` · ` and uses a single space after `state_icon`. Missing values and their separators disappear; a row disappears when none of its tokens have a value. Existing custom rows remain unchanged, so add `machine` explicitly if you want machine identity in a custom multi-machine layout. Each layout may contain at most 16 rows, with at most 16 tokens in each row.
+ 
+diff --git a/src/client/shell/agent_sidebar.rs b/src/client/shell/agent_sidebar.rs
+index e43ab8cc..dc6bf30c 100644
+--- a/src/client/shell/agent_sidebar.rs
++++ b/src/client/shell/agent_sidebar.rs
+@@ -148,6 +148,15 @@ pub(super) fn render_agent_panel_header(
+             })
+             .add_modifier(Modifier::BOLD),
+     );
++    // `+` just left of the sort toggle opens a new tab to start an agent in.
++    if config.mouse_capture
++        && agent_view_label.is_none()
++        && area.width >= sort_rect.width.saturating_add(12)
++    {
++        let plus_area = Rect::new(area.x, sort_rect.y, sort_rect.x.saturating_sub(area.x), 1);
++        hits.agents_add =
++            super::sidebar::render_header_add(buffer, plus_area, sort_rect.y, &config.palette);
++    }
+     true
+ }
+ 
+diff --git a/src/client/shell/mouse.rs b/src/client/shell/mouse.rs
+index 8e873d68..29a94f80 100644
+--- a/src/client/shell/mouse.rs
++++ b/src/client/shell/mouse.rs
+@@ -2046,7 +2046,16 @@ impl ClientShellState {
+                     outcome.repaint = true;
+                     return;
+                 }
+-                if super::contains(self.hits.new_workspace, point) {
++                if super::contains(self.hits.agents_add, point) {
++                    self.record_binding(
++                        crate::input::KeybindMatch::Action(crate::input::KeybindAction::NewTab),
++                        outcome,
++                    );
++                    return;
++                }
++                if super::contains(self.hits.new_workspace, point)
++                    || super::contains(self.hits.spaces_add, point)
++                {
+                     self.record_binding(
+                         crate::input::KeybindMatch::Action(
+                             crate::input::KeybindAction::NewWorkspace,
+diff --git a/src/client/shell/render.rs b/src/client/shell/render.rs
+index 8935c1f6..82079bb4 100644
+--- a/src/client/shell/render.rs
++++ b/src/client/shell/render.rs
+@@ -335,6 +335,8 @@ pub(super) fn render_shell(
+         hits.agent_scrollbar = Rect::default();
+         hits.agent_sort_toggle = Rect::default();
+         hits.new_workspace = Rect::default();
++        hits.spaces_add = Rect::default();
++        hits.agents_add = Rect::default();
+         hits.machines.clear();
+         hits.workspaces.clear();
+         hits.agents.clear();
+diff --git a/src/client/shell/sidebar.rs b/src/client/shell/sidebar.rs
+index 71696002..a06fad30 100644
+--- a/src/client/shell/sidebar.rs
++++ b/src/client/shell/sidebar.rs
+@@ -24,6 +24,28 @@ pub(in crate::client::shell) fn workspace_active_background(
+     }
+ }
+ 
++/// Draws a `+` at the right end of a sidebar section header and returns its
++/// hit area, padded a cell to each side so it is easy to click.
++pub(in crate::client::shell) fn render_header_add(
++    buffer: &mut Buffer,
++    area: Rect,
++    y: u16,
++    palette: &Palette,
++) -> Rect {
++    let x = area.right().saturating_sub(2);
++    put_text(
++        buffer,
++        x,
++        y,
++        1,
++        "+",
++        Style::default()
++            .fg(palette.overlay1)
++            .add_modifier(Modifier::BOLD),
++    );
++    Rect::new(x.saturating_sub(1), y, 3.min(area.right() - x + 1), 1)
++}
++
+ /// Resting fill of a space row in the expanded sidebar; glides ease between these.
+ pub(in crate::client::shell) fn workspace_row_fill(
+     palette: &Palette,
+@@ -238,6 +260,9 @@ pub(crate) fn render_sidebar(
+             .fg(palette.overlay0)
+             .add_modifier(Modifier::BOLD),
+     );
++    if config.mouse_capture && workspace_area.width >= 12 && workspace_area.height > 0 {
++        hits.spaces_add = render_header_add(buffer, workspace_area, workspace_area.y, palette);
++    }
+ 
+     let entries = workspace_entries(snapshot, state.collapsed_groups);
+     let body = Rect::new(
+diff --git a/src/client/shell/state.rs b/src/client/shell/state.rs
+index 69be9d99..991e5f39 100644
+--- a/src/client/shell/state.rs
++++ b/src/client/shell/state.rs
+@@ -106,6 +106,10 @@ pub(super) struct ShellHitMap {
+     pub(super) sidebar_section_divider: Rect,
+     pub(super) sidebar_toggle: Rect,
+     pub(super) new_workspace: Rect,
++    /// `+` on the spaces header: new space.
++    pub(super) spaces_add: Rect,
++    /// `+` on the agents header: new tab to start an agent in.
++    pub(super) agents_add: Rect,
+     pub(super) new_tab: Rect,
+     pub(super) tab_scroll_left: Rect,
+     pub(super) tab_scroll_right: Rect,
+diff --git a/src/client/shell/tabs.rs b/src/client/shell/tabs.rs
+index 0e0a6665..2da52669 100644
+--- a/src/client/shell/tabs.rs
++++ b/src/client/shell/tabs.rs
+@@ -7,6 +7,8 @@ const MIN_TAB_STRIP_WIDTH: u16 =
+ /// draw these themselves, so the rounded tab ends need no patched font.
+ const TAB_CAP_LEFT: &str = "\u{e0b6}";
+ const TAB_CAP_RIGHT: &str = "\u{e0b4}";
++/// Narrowest tab pill: a one-character label sits between four cells of air.
++const MIN_PILL_WIDTH: u16 = 11;
+ 
+ /// Resting (text, fill) colors of a tab; glides ease between these.
+ pub(in crate::client::shell) fn tab_colors(
+@@ -46,7 +48,9 @@ pub(crate) fn render_tab_bar(
+         .iter()
+         .map(|tab| {
+             let label = display_width(&tab_label(tab));
+-            let width = label.saturating_add(4).max(MIN_TAB_WIDTH);
++            // Two cells of air between the label and each pill cap, and short
++            // labels like "1" get a fuller pill.
++            let width = label.saturating_add(6).max(MIN_PILL_WIDTH);
+             // Even padding keeps the label exactly centered between the pill caps.
+             width.saturating_add((width - label) % 2)
+         })
+diff --git a/src/config/sidebar.rs b/src/config/sidebar.rs
+index 9a4cb5e0..56db361d 100644
+--- a/src/config/sidebar.rs
++++ b/src/config/sidebar.rs
+@@ -115,6 +115,8 @@ pub enum AgentSidebarToken {
+     Agent,
+     TerminalTitle,
+     TerminalTitleStripped,
++    /// A fixed glyph, written `icon:<glyph>` (accent-colored unless styled).
++    Icon(String),
+     Custom(String),
+     Styled {
+         token: Box<AgentSidebarToken>,
+@@ -130,6 +132,8 @@ pub enum SpaceSidebarToken {
+     Workspace,
+     Branch,
+     GitStatus,
++    /// A fixed glyph, written `icon:<glyph>` (accent-colored unless styled).
++    Icon(String),
+     Custom(String),
+     Styled {
+         token: Box<SpaceSidebarToken>,
+@@ -200,7 +204,8 @@ impl RawSidebarToken {
+                     return Err("sidebar tokens may contain at most 16 rules".into());
+                 }
+                 if !token.rules.is_empty()
+-                    && matches!(token.token.as_str(), "state_icon" | "git_status")
++                    && (matches!(token.token.as_str(), "state_icon" | "git_status")
++                        || token.token.starts_with(ICON_TOKEN_PREFIX))
+                 {
+                     return Err("sidebar rules require a text-valued token".into());
+                 }
+@@ -218,13 +223,31 @@ impl RawSidebarToken {
+     }
+ }
+ 
+-fn parse_sidebar_token<T>(value: String, builtins: &[(&str, T)]) -> Result<T, String>
++/// Prefix of the fixed-glyph token, e.g. `icon:` for a folder.
++const ICON_TOKEN_PREFIX: &str = "icon:";
++/// Widest glyph an icon token may hold, in terminal cells.
++const ICON_TOKEN_MAX_WIDTH: usize = 2;
++
++fn parse_sidebar_token<T>(
++    value: String,
++    builtins: &[(&str, T)],
++    icon: fn(String) -> T,
++) -> Result<T, String>
+ where
+     T: Clone + From<String>,
+ {
+     if let Some((_, token)) = builtins.iter().find(|(name, _)| *name == value) {
+         return Ok(token.clone());
+     }
++    if let Some(glyph) = value.strip_prefix(ICON_TOKEN_PREFIX) {
++        let width = unicode_width::UnicodeWidthStr::width(glyph);
++        if glyph.chars().any(char::is_control) || width == 0 || width > ICON_TOKEN_MAX_WIDTH {
++            return Err(format!(
++                "invalid sidebar icon `{value}`; use one glyph up to {ICON_TOKEN_MAX_WIDTH} cells wide"
++            ));
++        }
++        return Ok(icon(glyph.to_string()));
++    }
+     let Some(name) = value.strip_prefix('$') else {
+         return Err(format!(
+             "unknown sidebar token `{value}`; custom tokens must start with `$`"
+@@ -279,6 +302,7 @@ fn agent_token_name(token: &AgentSidebarToken) -> String {
+         AgentSidebarToken::Agent => "agent".into(),
+         AgentSidebarToken::TerminalTitle => "terminal_title".into(),
+         AgentSidebarToken::TerminalTitleStripped => "terminal_title_stripped".into(),
++        AgentSidebarToken::Icon(glyph) => format!("{ICON_TOKEN_PREFIX}{glyph}"),
+         AgentSidebarToken::Custom(name) => format!("${name}"),
+         AgentSidebarToken::Styled { token, .. } => agent_token_name(token),
+     }
+@@ -291,6 +315,7 @@ fn space_token_name(token: &SpaceSidebarToken) -> String {
+         SpaceSidebarToken::Workspace => "workspace".into(),
+         SpaceSidebarToken::Branch => "branch".into(),
+         SpaceSidebarToken::GitStatus => "git_status".into(),
++        SpaceSidebarToken::Icon(glyph) => format!("{ICON_TOKEN_PREFIX}{glyph}"),
+         SpaceSidebarToken::Custom(name) => format!("${name}"),
+         SpaceSidebarToken::Styled { token, .. } => space_token_name(token),
+     }
+@@ -339,6 +364,7 @@ impl<'de> Deserialize<'de> for AgentSidebarToken {
+                 ("terminal_title", Self::TerminalTitle),
+                 ("terminal_title_stripped", Self::TerminalTitleStripped),
+             ],
++            Self::Icon,
+         )
+         .map_err(serde::de::Error::custom)?;
+         Ok(style.map_or(token.clone(), |style| Self::Styled {
+@@ -388,6 +414,7 @@ impl<'de> Deserialize<'de> for SpaceSidebarToken {
+                 ("branch", Self::Branch),
+                 ("git_status", Self::GitStatus),
+             ],
++            Self::Icon,
+         )
+         .map_err(serde::de::Error::custom)?;
+         Ok(style.map_or(token.clone(), |style| Self::Styled {
+@@ -565,6 +592,40 @@ row_gap = 3
+         assert_eq!(config.ui.sidebar.spaces.row_gap, 3);
+     }
+ 
++    #[test]
++    fn parses_icon_tokens_and_rejects_text_or_empty_icons() {
++        let config: crate::config::Config = toml::from_str(
++            r##"
++[ui.sidebar.spaces]
++rows = [[{ token = "icon:\uF07B", fg = "#007aff" }, "workspace"]]
++
++[ui.sidebar.agents]
++rows = [["icon:◆", "agent"]]
++"##,
++        )
++        .unwrap();
++        let (token, style) = config.ui.sidebar.spaces.rows[0][0].parts();
++        assert_eq!(token, &SpaceSidebarToken::Icon("\u{f07b}".into()));
++        assert!(style.fg.is_some());
++        assert_eq!(
++            config.ui.sidebar.agents.rows[0][0],
++            AgentSidebarToken::Icon("◆".into())
++        );
++
++        for invalid in ["icon:", "icon:abc", "icon:\u{7}"] {
++            let source = format!("[ui.sidebar.spaces]\nrows = [[{invalid:?}]]\n");
++            assert!(
++                toml::from_str::<crate::config::Config>(&source).is_err(),
++                "{invalid:?} should be rejected"
++            );
++        }
++        let ruled = r##"
++[ui.sidebar.spaces]
++rows = [[{ token = "icon:", rules = [{ equals = "x", hide = true }] }]]
++"##;
++        assert!(toml::from_str::<crate::config::Config>(ruled).is_err());
++    }
++
+     #[test]
+     fn parses_occurrence_styles_without_changing_plain_tokens() {
+         let config: crate::config::Config = toml::from_str(
+diff --git a/src/ui/sidebar.rs b/src/ui/sidebar.rs
+index cbf6f1a9..457f45c5 100644
+--- a/src/ui/sidebar.rs
++++ b/src/ui/sidebar.rs
+@@ -117,6 +117,7 @@ pub(crate) fn resolved_token_spans(
+         .iter()
+         .map(|token| match &token.kind {
+             ResolvedTokenKind::StateIcon => display_width(state_icon.0),
++            ResolvedTokenKind::Icon(glyph) => display_width(glyph),
+             ResolvedTokenKind::GitStatus { ahead, behind } => {
+                 usize::from(*ahead > 0) * display_width(&format!("↑{ahead}"))
+                     + usize::from(*behind > 0) * display_width(&format!("↓{behind}"))
+@@ -227,6 +228,10 @@ pub(crate) fn resolved_token_spans(
+                 state_icon.0.to_string(),
+                 apply_token_style(state_icon.1, token.style),
+             )),
++            ResolvedTokenKind::Icon(glyph) => spans.push(Span::styled(
++                glyph.clone(),
++                apply_token_style(Style::default().fg(palette.accent), token.style),
++            )),
+             ResolvedTokenKind::StateText(text) => spans.push(Span::styled(
+                 truncate_end(text, budgets[index]),
+                 apply_token_style(state_text_style, token.style),
+diff --git a/src/ui/sidebar/tokens.rs b/src/ui/sidebar/tokens.rs
+index c1e38aa9..c01750e8 100644
+--- a/src/ui/sidebar/tokens.rs
++++ b/src/ui/sidebar/tokens.rs
+@@ -12,6 +12,8 @@ pub(crate) struct ResolvedToken {
+ #[derive(Debug, Clone, PartialEq, Eq)]
+ pub(crate) enum ResolvedTokenKind {
+     StateIcon,
++    /// A fixed glyph from an `icon:` token.
++    Icon(String),
+     StateText(String),
+     Machine(String),
+     Workspace(String),
+@@ -20,7 +22,10 @@ pub(crate) enum ResolvedTokenKind {
+     Agent(String),
+     TerminalTitle(String),
+     Branch(String),
+-    GitStatus { ahead: usize, behind: usize },
++    GitStatus {
++        ahead: usize,
++        behind: usize,
++    },
+     Custom(String),
+ }
+ 
+@@ -36,7 +41,7 @@ impl ResolvedTokenKind {
+             | Self::TerminalTitle(value)
+             | Self::Branch(value)
+             | Self::Custom(value) => Some(value),
+-            Self::StateIcon | Self::GitStatus { .. } => None,
++            Self::StateIcon | Self::Icon(_) | Self::GitStatus { .. } => None,
+         }
+     }
+ }
+@@ -79,6 +84,9 @@ pub(crate) fn agent_rows(
+                     let (token, style) = configured.parts();
+                     let kind = match token {
+                         AgentSidebarToken::StateIcon => Some(ResolvedTokenKind::StateIcon),
++                        AgentSidebarToken::Icon(glyph) => {
++                            Some(ResolvedTokenKind::Icon(glyph.clone()))
++                        }
+                         AgentSidebarToken::StateText => {
+                             Some(ResolvedTokenKind::StateText(state_text.to_string()))
+                         }
+@@ -144,6 +152,9 @@ pub(crate) fn space_rows(
+                     let (token, style) = configured.parts();
+                     let kind = match token {
+                         SpaceSidebarToken::StateIcon => Some(ResolvedTokenKind::StateIcon),
++                        SpaceSidebarToken::Icon(glyph) => {
++                            Some(ResolvedTokenKind::Icon(glyph.clone()))
++                        }
+                         SpaceSidebarToken::StateText => {
+                             Some(ResolvedTokenKind::StateText(context.state_text.to_string()))
+                         }
+@@ -178,8 +189,10 @@ pub(crate) fn space_rows(
+ }
+ 
+ pub(crate) fn separator(previous: &ResolvedToken, current: &ResolvedToken) -> &'static str {
+-    if matches!(previous.kind, ResolvedTokenKind::StateIcon)
+-        || matches!(current.kind, ResolvedTokenKind::GitStatus { .. })
++    if matches!(
++        previous.kind,
++        ResolvedTokenKind::StateIcon | ResolvedTokenKind::Icon(_)
++    ) || matches!(current.kind, ResolvedTokenKind::GitStatus { .. })
+     {
+         " "
+     } else {
+-- 
+2.43.0
+

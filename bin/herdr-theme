@@ -1,0 +1,143 @@
+#!/usr/bin/env zsh
+# Theme herdr and only the kitty tabs herdr runs in; every other kitty tab
+# keeps kitty's own theme (~/.config/kitty/current-theme.conf).
+#
+#   herdr-theme                 list themes (current one marked)
+#   herdr-theme <name>          switch, e.g. herdr-theme whitby
+#   herdr-theme next            cycle to the next theme (bound to prefix+t)
+#
+# Sets herdr's [theme] in config.toml, writes the matching terminal colors to
+# ~/.config/kitty/herdr-colors.conf, and recolors kitty tabs running herdr. The
+# kitty watcher ~/.config/kitty/herdr_tab.py applies that file when you start
+# herdr in a tab and puts kitty's colors back when it exits.
+#   whitby    white Whitby palette (catppuccin-latte base)
+#   terminal  herdr's tab keeps kitty's own theme and herdr follows it
+# A theme with ~/.config/herdr/theme-overrides/<name>.toml gets that
+# [theme.custom] table layered over its base palette. Collie themes
+# (colliepwa.dev/themes) become <id>-light / <id>-dark via herdr-collie-themes.
+
+emulate -L zsh
+setopt pipefail err_return
+
+config=${HERDR_CONFIG:-$HOME/.config/herdr/config.toml}
+overrides_dir=$HOME/.config/herdr/theme-overrides
+kitty_dir=$HOME/.config/kitty
+theme_dir=$kitty_dir/herdr-themes
+colors=$kitty_dir/herdr-colors.conf
+
+# herdr built-in -> kitty theme (names as `kitten themes` knows them).
+typeset -A kitty_for=(
+  catppuccin        'Catppuccin-Mocha'
+  catppuccin-latte  'Catppuccin-Latte'
+  tokyo-night       'Tokyo Night'
+  tokyo-night-day   'Tokyo Night Day'
+  dracula           'Dracula'
+  nord              'Nord'
+  gruvbox           'Gruvbox Dark'
+  gruvbox-light     'Gruvbox Light'
+  one-dark          'One Dark'
+  one-light         'One Half Light'
+  solarized         'Solarized Dark'
+  solarized-light   'Solarized Light'
+  kanagawa          'Kanagawa'
+  kanagawa-lotus    'Kanagawa_light'
+  rose-pine         'Rosé Pine'
+  rose-pine-dawn    'Rosé Pine Dawn'
+  vesper            'Vesper'
+)
+order=(catppuccin-latte tokyo-night-day gruvbox-light one-light
+       solarized-light kanagawa-lotus rose-pine-dawn
+       catppuccin tokyo-night dracula nord gruvbox one-dark solarized
+       kanagawa rose-pine vesper terminal)
+# Plus every theme defined only by an overrides file: whitby, and the Collie
+# themes ~/.local/bin/herdr-collie-themes writes (<id>-light, <id>-dark).
+for f in $overrides_dir/*.toml(N); do
+  [[ -z ${order[(r)${f:t:r}]} ]] && order+=(${f:t:r})
+done
+
+current=$(awk '
+  /^\[/ { s = ($0 == "[theme]") }
+  /^# herdr-theme: / { m = $3 }
+  s && /^name *=/ { gsub(/^name *= *"|".*$/, ""); n = $0 }
+  END { print (m != "" ? m : n) }
+' "$config")
+
+if [[ $# -eq 0 ]]; then
+  for t in $order; do
+    [[ $t == $current ]] && print -- "* $t" || print -- "  $t"
+  done
+  return 0
+fi
+
+target=${1:l}
+if [[ $target == next ]]; then
+  i=${order[(ie)$current]}
+  target=${order[$(( i % $#order + 1 ))]}
+fi
+if [[ -z ${order[(r)$target]} ]]; then
+  print -u2 "herdr-theme: unknown theme '$1'; run herdr-theme for the list"
+  return 1
+fi
+
+# Terminal colors for herdr's tab: a theme's own file in herdr-themes/, else
+# the matching kitty theme (per-window keys only).
+case $target in
+  terminal) cp "$kitty_dir/current-theme.conf" "$colors" ;;
+  *)
+    if [[ ! -s $theme_dir/$target.conf ]]; then
+      mkdir -p "$theme_dir"
+      kitten themes --dump-theme -- "${kitty_for[$target]}" \
+        | grep -E '^(foreground|background|cursor|cursor_text_color|selection_foreground|selection_background|url_color|color[0-9]+)[[:space:]]' \
+        >| "$theme_dir/$target.conf.tmp"
+      mv -f "$theme_dir/$target.conf.tmp" "$theme_dir/$target.conf"
+    fi
+    cp "$theme_dir/$target.conf" "$colors"
+    ;;
+esac
+
+# herdr config: set [theme] name; drop any [theme.custom*] tables; add the
+# theme's override table if it has one. A theme that isn't a herdr built-in
+# names its base with "# herdr-theme-base: <built-in>" in that table.
+herdr_name=$target
+[[ -f $overrides_dir/$target.toml ]] && herdr_name=$(awk '
+  /^# herdr-theme-base: / { print $3; exit }' "$overrides_dir/$target.toml")
+[[ -n $herdr_name ]] || herdr_name=$target
+block=$overrides_dir/$target.toml
+[[ -f $block ]] || block=
+tmp=$(mktemp)
+awk -v name="$herdr_name" -v block="$block" '
+  function flush() {
+    if (pending && block != "") {
+      while ((getline line < block) > 0) print line
+      close(block); print ""
+    }
+    pending = 0
+  }
+  /^\[/ {
+    if ($0 ~ /^\[theme\.custom(\.[a-z]+)?\]$/) { skip = 1; next }
+    skip = 0; flush()
+    s = ($0 == "[theme]"); if (s) pending = 1
+  }
+  skip { next }
+  s && /^name *=/ { print "name = \"" name "\""; next }
+  { print }
+  END { flush() }
+' "$config" >| "$tmp"
+cat "$tmp" >| "$config"   # rewrite in place: keeps the file's mode and inode
+rm -f "$tmp"
+herdr server reload-config >/dev/null
+
+# Recolor kitty tabs currently running a herdr client.
+for sock in /tmp/kitty-*(N=); do
+  for win in $(kitty @ --to "unix:$sock" ls 2>/dev/null | jq -r '
+      .[].tabs[].windows[]
+      | select(any(.foreground_processes[]; (.cmdline[0] // "") | test("(^|/)herdr$")))
+      | .id'); do
+    # set-colors only changes keys the file names: drop translucent colors from
+    # the previous theme first.
+    kitty @ --to "unix:$sock" set-colors --match "id:$win" 'transparent_background_colors=' || true
+    kitty @ --to "unix:$sock" set-colors --match "id:$win" "$colors" || true
+  done
+done
+
+print -- "herdr: $target${kitty_for[$target]:+ (herdr window colors: ${kitty_for[$target]})}"

@@ -1,0 +1,25 @@
+[theme.custom]
+# herdr-theme: whitby
+# herdr-theme-base: catppuccin-latte
+# Whitby light (github.com/shellscape/herdr-whitby), mapped onto the Radix slate
+# scale Whitby is built on, by what each herdr token draws. Layered over
+# catppuccin-latte; inserted/removed by ~/.local/bin/herdr-theme.
+panel_bg = "#ffffff"        # tab row, popups, overlays: matches the white terminal
+sidebar_bg = "#f0f0f3"      # slate 3: a grey rail the white panes sit beside
+active_row_bg = "#e0e1e6"   # slate 5: the active space/agent row
+selection_bg = "#dbe7fe"    # accent tint: navigate-mode cursor, distinct from active row
+surface0 = "#e8e8ec"        # slate 4: inactive tabs, notices
+surface1 = "#d9d9e0"        # slate 6
+surface_dim = "#cdced6"     # slate 7: sidebar edge, section rules, scroll track
+overlay0 = "#8b8d98"        # slate 9: unfocused pane borders, muted labels
+overlay1 = "#6f727b"        # between slate 10 and 11: secondary labels
+text = "#1c2024"            # slate 12
+subtext0 = "#60646c"        # slate 11
+accent = "#246cf4"          # Whitby blue: focused pane border, active tab
+blue = "#246cf4"
+green = "#2e9f4b"           # working
+yellow = "#b7791f"          # blocked
+red = "#c93c37"             # error
+mauve = "#7c5cd6"           # needs you / resize mode
+teal = "#2b9093"
+peach = "#b48235"

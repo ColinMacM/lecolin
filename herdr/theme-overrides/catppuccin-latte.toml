@@ -1,0 +1,10 @@
+[theme.custom]
+# herdr-theme: catppuccin-latte
+# Catppuccin Latte (catppuccin.com/palette) laid out the way Catppuccin's style
+# guide layers an app: panes on base, sidebar on mantle, dividers on surface 1.
+# Herdr's built-in latte leaves the sidebar on base with a mantle divider, so
+# the two blend. Layered over catppuccin-latte by ~/.local/bin/herdr-theme.
+sidebar_bg = "#e6e9ef"      # mantle
+active_row_bg = "#ccd0da"   # surface 0: active space/agent row
+selection_bg = "#c3ccf3"    # lavender over mantle: navigate-mode cursor
+surface_dim = "#bcc0cc"     # surface 1: sidebar edge, section rules, scroll track

@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+"""Turn ColliePWA themes (colliepwa.dev/themes) into herdr themes for herdr-theme.
+
+    herdr-collie-themes                    the four themes Collie ships (from the installed plugin)
+    herdr-collie-themes FILE|URL ...       any Collie theme file, e.g. a community theme's
+                                           raw collie-theme.json from colliepwa.dev/themes
+
+Each theme becomes two herdr themes, <id>-light and <id>-dark (Collie's two halves):
+  ~/.config/herdr/theme-overrides/<name>.toml   herdr palette ([theme.custom] over a built-in base)
+  ~/.config/kitty/herdr-themes/<name>.conf      colors for the kitty tab herdr runs in
+Then `herdr-theme <name>` switches to one.
+
+Token mapping, by what each herdr token draws (herdr src: client/shell/*, ui/panes.rs):
+  panel_bg      background        tab row, popups; equals the tab's terminal background
+  sidebar_bg    chrome            Collie's band behind its header and bars
+  active_row_bg accent            Collie's selected/hover fill
+  selection_bg  control-on        Collie's "on" fill: navigate-mode cursor
+  surface0      muted             inactive tabs, notices
+  surface1      border
+  surface_dim   rule              sidebar edge, section rules, scroll track
+  overlay0      input             unfocused pane borders and muted labels
+  overlay1/subtext0 muted-foreground
+  text          foreground
+  accent        pane-active, else primary   focused pane border, active tab (Collie's ink)
+  yellow/red/teal/green  status-working/-blocked/-done/-idle  (herdr's agent-state colors)
+  blue/mauve/peach       status-info / syntax-entity / syntax-constant
+Terminal: the dark half uses the theme's own `ansi` palette (made for a dark ground); the light
+half takes its ANSI colors from the light half's status and syntax tokens so they read on light.
+"""
+
+import json
+import math
+import re
+import sys
+import urllib.request
+from pathlib import Path
+
+HOME = Path.home()
+OVERRIDES = HOME / ".config/herdr/theme-overrides"
+KITTY_THEMES = HOME / ".config/kitty/herdr-themes"
+PLUGINS_JSON = HOME / ".config/herdr/plugins.json"
+NUM = r"([-+]?\d*\.?\d+)(%?)"
+
+
+def oklch_to_rgb(L, C, h):
+    a, b = C * math.cos(math.radians(h)), C * math.sin(math.radians(h))
+    l_ = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3
+    m_ = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3
+    s_ = (L - 0.0894841775 * a - 1.2914855480 * b) ** 3
+    lin = (
+        4.0767416621 * l_ - 3.3077115913 * m_ + 0.2309699292 * s_,
+        -1.2684380046 * l_ + 2.6097574011 * m_ - 0.3413193965 * s_,
+        -0.0041960863 * l_ - 0.7034186147 * m_ + 1.7076147010 * s_,
+    )
+
+    def enc(x):
+        x = min(max(x, 0.0), 1.0)
+        return 12.92 * x if x <= 0.0031308 else 1.055 * x ** (1 / 2.4) - 0.055
+
+    return tuple(round(enc(c) * 255) for c in lin)
+
+
+def parse(value):
+    """Collie colour -> ((r, g, b), alpha). Accepts oklch(...) and #hex."""
+    v = value.strip()
+    m = re.fullmatch(rf"oklch\(\s*{NUM}\s+{NUM}\s+{NUM}\s*(?:/\s*{NUM})?\s*\)", v)
+    if m:
+        L = float(m[1]) / (100 if m[2] else 1)
+        C, h = float(m[3]), float(m[5])
+        alpha = 1.0 if m[7] is None else float(m[7]) / (100 if m[8] else 1)
+        return oklch_to_rgb(L, C, h), alpha
+    m = re.fullmatch(r"#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?", v)
+    if m:
+        rgb = tuple(int(m[1][i:i + 2], 16) for i in (0, 2, 4))
+        return rgb, 1.0 if m[2] is None else int(m[2], 16) / 255
+    raise ValueError(f"unsupported colour: {value}")
+
+
+def hexcolor(rgb):
+    return "#%02x%02x%02x" % rgb
+
+
+def resolve(half, token, ground):
+    """Token as opaque hex, composited over the half's background when translucent."""
+    rgb, alpha = parse(half[token])
+    if alpha < 1:
+        rgb = tuple(round(alpha * c + (1 - alpha) * g) for c, g in zip(rgb, ground))
+    return hexcolor(rgb)
+
+
+def convert(theme):
+    tid = theme["id"]
+    written = []
+    for half_name in ("light", "dark"):
+        half = theme.get(half_name)
+        if not half:
+            continue
+        ground, _ = parse(half["background"])
+
+        def c(*tokens):
+            for t in tokens:
+                if half.get(t):
+                    return resolve(half, t, ground)
+            raise KeyError(f"{tid} {half_name}: none of {tokens}")
+
+        name = f"{tid}-{half_name}"
+        base = "catppuccin-latte" if half_name == "light" else "catppuccin"
+        palette = {
+            "panel_bg": c("background"),
+            "sidebar_bg": c("chrome", "secondary", "muted"),
+            "active_row_bg": c("accent", "muted"),
+            "selection_bg": c("control-on", "accent"),
+            "surface0": c("muted", "secondary"),
+            "surface1": c("border"),
+            "surface_dim": c("rule", "border"),
+            "overlay0": c("input", "rule"),
+            "overlay1": c("muted-foreground"),
+            "text": c("foreground"),
+            "subtext0": c("muted-foreground"),
+            "accent": c("pane-active", "primary"),
+            "blue": c("status-info", "primary"),
+            "green": c("status-idle"),
+            "yellow": c("status-working"),
+            "red": c("status-blocked", "destructive"),
+            "mauve": c("syntax-entity", "syntax-keyword"),
+            "teal": c("status-done"),
+            "peach": c("syntax-constant"),
+        }
+        toml = [
+            "[theme.custom]",
+            f"# herdr-theme: {name}",
+            f"# herdr-theme-base: {base}",
+            f"# Collie theme \"{theme.get('name', tid)}\" by {theme.get('author', '?')}, {half_name} half.",
+            "# Generated by ~/.local/bin/herdr-collie-themes; rerun it rather than editing.",
+        ] + [f'{k} = "{v}"' for k, v in palette.items()]
+        (OVERRIDES / f"{name}.toml").write_text("\n".join(toml) + "\n")
+
+        ansi = theme.get("ansi", {})
+        if half_name == "dark" and all(str(i) in ansi for i in range(16)):
+            colors = [hexcolor(parse(ansi[str(i)])[0]) for i in range(16)]
+        else:
+            normal = [
+                c("foreground"), c("destructive"), c("status-done"), c("status-working"),
+                c("status-info", "syntax-string"), c("syntax-keyword"), c("syntax-property"), c("rule"),
+            ]
+            colors = normal + [c("muted-foreground")] + normal[1:7] + [c("border")]
+        kitty = [
+            f"# Collie theme \"{theme.get('name', tid)}\", {half_name} half: colors for herdr's kitty tab.",
+            "# Generated by ~/.local/bin/herdr-collie-themes.",
+            f"foreground           {c('foreground')}",
+            f"background           {c('background')}",
+            f"cursor               {c('foreground')}",
+            f"cursor_text_color    {c('background')}",
+            f"selection_foreground {c('control-on-foreground', 'foreground')}",
+            f"selection_background {c('control-on', 'accent')}",
+            f"url_color            {c('status-info', 'primary')}",
+        ] + [f"color{i:<2} {col}" for i, col in enumerate(colors)]
+        (KITTY_THEMES / f"{name}.conf").write_text("\n".join(kitty) + "\n")
+        written.append(name)
+    return written
+
+
+def shipped_theme_files():
+    plugins = json.loads(PLUGINS_JSON.read_text())
+    root = next(p["plugin_root"] for p in plugins if p["plugin_id"] == "herdr.collie")
+    return sorted(Path(root, "web/src/themes").glob("*.json"))
+
+
+def load(source):
+    if re.match(r"https?://", source):
+        with urllib.request.urlopen(source, timeout=30) as r:
+            return json.load(r)
+    return json.loads(Path(source).read_text())
+
+
+def main(args):
+    OVERRIDES.mkdir(parents=True, exist_ok=True)
+    KITTY_THEMES.mkdir(parents=True, exist_ok=True)
+    sources = args or [str(p) for p in shipped_theme_files()]
+    for src in sources:
+        names = convert(load(src))
+        print(f"{src}: {' '.join(names)}")
+    print("switch with: herdr-theme <name>")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

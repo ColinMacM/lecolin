@@ -1,0 +1,311 @@
+From d43c6aeb0aef890ee9437345b48ebbfc2aa1b305 Mon Sep 17 00:00:00 2001
+From: colin <colin@localhost>
+Date: Mon, 9 Nov 2026 16:32:51 -0800
+Subject: [PATCH 3/3] local: pane_border and pane_border_focused theme tokens
+
+---
+ .../src/content/docs/configuration.mdx        |  2 +-
+ src/app/state.rs                              | 85 +++++++++++++++++++
+ src/config/theme.rs                           |  6 ++
+ src/ui/panes.rs                               |  4 +-
+ 4 files changed, 94 insertions(+), 3 deletions(-)
+
+diff --git a/docs/next/website/src/content/docs/configuration.mdx b/docs/next/website/src/content/docs/configuration.mdx
+index af5a1dbe..d1eeba28 100644
+--- a/docs/next/website/src/content/docs/configuration.mdx
++++ b/docs/next/website/src/content/docs/configuration.mdx
+@@ -286,7 +286,7 @@ red = "#f38ba8"
+ yellow = "#f9e2af"
+ ```
+ 
+-`sidebar_bg` optionally gives the desktop sidebar its own background. When omitted, the sidebar keeps the host terminal background. `active_row_bg` changes the active Space and focused Agent row background without affecting separators or scrollbar tracks. `selection_bg` changes the Navigate-mode cursor row background in the sidebar.
++`sidebar_bg` optionally gives the desktop sidebar its own background. When omitted, the sidebar keeps the host terminal background. `active_row_bg` changes the active Space and focused Agent row background without affecting separators or scrollbar tracks. `selection_bg` changes the Navigate-mode cursor row background in the sidebar. `pane_border` and `pane_border_focused` color the split-pane borders; they default to `overlay0` and `accent`, so muted text and the accent can differ from the borders.
+ 
+ Color values accept hex, named colors, `rgb(r,g,b)`, or reset aliases like `reset`, `default`, `none`, and `transparent`.
+ 
+diff --git a/src/app/state.rs b/src/app/state.rs
+index f30279d6..b4edbbc0 100644
+--- a/src/app/state.rs
++++ b/src/app/state.rs
+@@ -71,6 +71,22 @@ pub struct Palette {
+     pub teal: Color,
+     /// Interrupted / warning states.
+     pub peach: Color,
++    /// Unfocused pane borders; `None` uses `overlay0`.
++    pub pane_border: Option<Color>,
++    /// The focused pane's border; `None` uses `accent`.
++    pub pane_border_focused: Option<Color>,
++}
++
++impl Palette {
++    /// Color of unfocused pane borders.
++    pub fn pane_border(&self) -> Color {
++        self.pane_border.unwrap_or(self.overlay0)
++    }
++
++    /// Color of the focused pane's border.
++    pub fn pane_border_focused(&self) -> Color {
++        self.pane_border_focused.unwrap_or(self.accent)
++    }
+ }
+ 
+ impl Palette {
+@@ -96,6 +112,8 @@ impl Palette {
+             blue: Color::Rgb(137, 180, 250),
+             teal: Color::Rgb(148, 226, 213),
+             peach: Color::Rgb(250, 179, 135),
++            pane_border: None,
++            pane_border_focused: None,
+         }
+     }
+ 
+@@ -121,6 +139,8 @@ impl Palette {
+             blue: Color::Rgb(30, 102, 245),
+             teal: Color::Rgb(23, 146, 153),
+             peach: Color::Rgb(254, 100, 11),
++            pane_border: None,
++            pane_border_focused: None,
+         }
+     }
+ 
+@@ -146,6 +166,8 @@ impl Palette {
+             blue: Color::Blue,
+             teal: Color::Cyan,
+             peach: Color::Yellow,
++            pane_border: None,
++            pane_border_focused: None,
+         }
+     }
+ 
+@@ -171,6 +193,8 @@ impl Palette {
+             blue: Color::Rgb(122, 162, 247),
+             teal: Color::Rgb(125, 207, 255),
+             peach: Color::Rgb(255, 158, 100),
++            pane_border: None,
++            pane_border_focused: None,
+         }
+     }
+ 
+@@ -196,6 +220,8 @@ impl Palette {
+             blue: Color::Rgb(46, 125, 233),
+             teal: Color::Rgb(17, 140, 116),
+             peach: Color::Rgb(177, 92, 0),
++            pane_border: None,
++            pane_border_focused: None,
+         }
+     }
+ 
+@@ -221,6 +247,8 @@ impl Palette {
+             blue: Color::Rgb(139, 233, 253), // cyan-ish
+             teal: Color::Rgb(139, 233, 253),
+             peach: Color::Rgb(255, 184, 108),
++            pane_border: None,
++            pane_border_focused: None,
+         }
+     }
+ 
+@@ -246,6 +274,8 @@ impl Palette {
+             blue: Color::Rgb(129, 161, 193),
+             teal: Color::Rgb(143, 188, 187),
+             peach: Color::Rgb(208, 135, 112),
++            pane_border: None,
++            pane_border_focused: None,
+         }
+     }
+ 
+@@ -271,6 +301,8 @@ impl Palette {
+             blue: Color::Rgb(131, 165, 152),
+             teal: Color::Rgb(142, 192, 124),
+             peach: Color::Rgb(254, 128, 25),
++            pane_border: None,
++            pane_border_focused: None,
+         }
+     }
+ 
+@@ -296,6 +328,8 @@ impl Palette {
+             blue: Color::Rgb(7, 102, 120),
+             teal: Color::Rgb(66, 123, 88),
+             peach: Color::Rgb(175, 58, 3),
++            pane_border: None,
++            pane_border_focused: None,
+         }
+     }
+ 
+@@ -321,6 +355,8 @@ impl Palette {
+             blue: Color::Rgb(97, 175, 239),
+             teal: Color::Rgb(86, 182, 194),
+             peach: Color::Rgb(209, 154, 102),
++            pane_border: None,
++            pane_border_focused: None,
+         }
+     }
+ 
+@@ -346,6 +382,8 @@ impl Palette {
+             blue: Color::Rgb(64, 120, 242),
+             teal: Color::Rgb(1, 132, 188),
+             peach: Color::Rgb(152, 104, 1),
++            pane_border: None,
++            pane_border_focused: None,
+         }
+     }
+ 
+@@ -371,6 +409,8 @@ impl Palette {
+             blue: Color::Rgb(38, 139, 210),
+             teal: Color::Rgb(42, 161, 152),
+             peach: Color::Rgb(203, 75, 22),
++            pane_border: None,
++            pane_border_focused: None,
+         }
+     }
+ 
+@@ -396,6 +436,8 @@ impl Palette {
+             blue: Color::Rgb(38, 139, 210),
+             teal: Color::Rgb(42, 161, 152),
+             peach: Color::Rgb(203, 75, 22),
++            pane_border: None,
++            pane_border_focused: None,
+         }
+     }
+ 
+@@ -421,6 +463,8 @@ impl Palette {
+             blue: Color::Rgb(126, 156, 216),
+             teal: Color::Rgb(127, 180, 202),
+             peach: Color::Rgb(255, 160, 102),
++            pane_border: None,
++            pane_border_focused: None,
+         }
+     }
+ 
+@@ -446,6 +490,8 @@ impl Palette {
+             blue: Color::Rgb(77, 105, 155),
+             teal: Color::Rgb(78, 140, 162),
+             peach: Color::Rgb(204, 109, 0),
++            pane_border: None,
++            pane_border_focused: None,
+         }
+     }
+ 
+@@ -471,6 +517,8 @@ impl Palette {
+             blue: Color::Rgb(49, 116, 143),    // pine
+             teal: Color::Rgb(156, 207, 216),   // foam
+             peach: Color::Rgb(234, 154, 151),  // rose
++            pane_border: None,
++            pane_border_focused: None,
+         }
+     }
+ 
+@@ -496,6 +544,8 @@ impl Palette {
+             blue: Color::Rgb(40, 105, 131),
+             teal: Color::Rgb(86, 148, 159),
+             peach: Color::Rgb(215, 130, 126),
++            pane_border: None,
++            pane_border_focused: None,
+         }
+     }
+ 
+@@ -521,6 +571,8 @@ impl Palette {
+             blue: Color::Rgb(176, 176, 176),
+             teal: Color::Rgb(102, 221, 204),
+             peach: Color::Rgb(255, 199, 153),
++            pane_border: None,
++            pane_border_focused: None,
+         }
+     }
+ 
+@@ -609,6 +661,12 @@ impl Palette {
+         if let Some(c) = &custom.peach {
+             self.peach = parse_color(c);
+         }
++        if let Some(c) = &custom.pane_border {
++            self.pane_border = Some(parse_color(c));
++        }
++        if let Some(c) = &custom.pane_border_focused {
++            self.pane_border_focused = Some(parse_color(c));
++        }
+         self
+     }
+ 
+@@ -671,6 +729,12 @@ impl Palette {
+         if let Some(c) = &custom.peach {
+             self.peach = parse_color(c);
+         }
++        if let Some(c) = &custom.pane_border {
++            self.pane_border = Some(parse_color(c));
++        }
++        if let Some(c) = &custom.pane_border_focused {
++            self.pane_border_focused = Some(parse_color(c));
++        }
+         self
+     }
+ }
+@@ -1483,6 +1547,27 @@ mod tests {
+         assert_eq!(palette.selection_bg, Color::Rgb(69, 71, 90));
+     }
+ 
++    #[test]
++    fn pane_borders_follow_muted_and_accent_until_overridden() {
++        let base = Palette::catppuccin();
++        assert_eq!(base.pane_border(), base.overlay0);
++        assert_eq!(base.pane_border_focused(), base.accent);
++
++        let custom = crate::config::CustomThemeColors {
++            pane_border: Some("#d8dce3".to_string()),
++            pane_border_focused: Some("#9ec5ff".to_string()),
++            ..Default::default()
++        };
++        let palette = base.clone().with_overrides(&custom);
++        assert_eq!(palette.pane_border(), Color::Rgb(0xd8, 0xdc, 0xe3));
++        assert_eq!(palette.pane_border_focused(), Color::Rgb(0x9e, 0xc5, 0xff));
++        assert_eq!(
++            palette.overlay0, base.overlay0,
++            "muted text keeps its color"
++        );
++        assert_eq!(palette.accent, base.accent, "the accent keeps its color");
++    }
++
+     #[test]
+     fn light_theme_aliases_resolve() {
+         for name in ["light", "latte", "tokyo-day", "onelight", "lotus", "dawn"] {
+diff --git a/src/config/theme.rs b/src/config/theme.rs
+index cb9e3498..95272254 100644
+--- a/src/config/theme.rs
++++ b/src/config/theme.rs
+@@ -119,6 +119,10 @@ pub struct CustomThemeColors {
+     pub blue: Option<String>,
+     pub teal: Option<String>,
+     pub peach: Option<String>,
++    /// Unfocused pane borders. Default: `overlay0`.
++    pub pane_border: Option<String>,
++    /// The focused pane's border. Default: `accent`.
++    pub pane_border_focused: Option<String>,
+     /// Overrides applied when `auto_switch` selects a light appearance.
+     pub light: Option<ModeThemeColors>,
+     /// Overrides applied when `auto_switch` selects a dark appearance.
+@@ -148,6 +152,8 @@ pub struct ModeThemeColors {
+     pub blue: Option<String>,
+     pub teal: Option<String>,
+     pub peach: Option<String>,
++    pub pane_border: Option<String>,
++    pub pane_border_focused: Option<String>,
+ }
+ 
+ /// Parse a color string into a ratatui Color.
+diff --git a/src/ui/panes.rs b/src/ui/panes.rs
+index c66cb4b9..592d1872 100644
+--- a/src/ui/panes.rs
++++ b/src/ui/panes.rs
+@@ -597,9 +597,9 @@ fn render_pane_borders(
+         let cell = &mut buf[(x, y)];
+         cell.set_symbol(symbol);
+         let color = if focused {
+-            app.palette.accent
++            app.palette.pane_border_focused()
+         } else {
+-            app.palette.overlay0
++            app.palette.pane_border()
+         };
+         cell.set_style(Style::default().fg(color));
+     }
+-- 
+2.43.0
+

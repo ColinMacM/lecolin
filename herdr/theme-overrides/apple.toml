@@ -1,0 +1,28 @@
+[theme.custom]
+# herdr-theme: apple
+# herdr-theme-base: catppuccin-latte
+# Apple light: white pane surfaces (#ffffff, kitty's background) on a #f5f5f7
+# app background, a #eceef2 sidebar, soft #d8dce3 borders, system blue accent.
+# Both chrome colors are listed in kitty/herdr-themes/apple.conf as transparent
+# background colors, so the sidebar and tab row let the desktop through.
+panel_bg = "#f5f5f7"            # app background: tab row, menus, popups
+sidebar_bg = "#eceef2"          # sidebar
+active_row_bg = "#dce9ff"       # selected space: selection blue
+selection_bg = "#cadeff"        # navigate-mode cursor, a step deeper
+surface0 = "#e4e7ec"            # inactive tabs, notices
+surface1 = "#d8dce3"
+surface_dim = "#d8dce3"         # sidebar edge, section rules, scroll track
+overlay0 = "#7b7f88"            # section labels, muted text (4:1 on the sidebar)
+overlay1 = "#5c6068"            # secondary labels, the + buttons
+text = "#24262b"
+subtext0 = "#5c6068"
+accent = "#007aff"              # active tab pill, icons
+pane_border = "#d8dce3"         # unfocused pane borders
+pane_border_focused = "#9ec5ff" # focused pane: a soft blue, not the full accent
+blue = "#007aff"
+green = "#34c759"               # idle
+yellow = "#ff9500"              # working
+red = "#ff3b30"                 # blocked
+teal = "#32ade6"                # done
+mauve = "#af52de"               # needs you / resize mode
+peach = "#ff9500"

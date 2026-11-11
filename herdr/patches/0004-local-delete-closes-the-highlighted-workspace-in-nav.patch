@@ -1,0 +1,185 @@
+From c53545a2246c0a0ac4eb71d660eb47537ca94b59 Mon Sep 17 00:00:00 2001
+From: Colin MacMillan <nilocmac64@gmail.com>
+Date: Wed, 11 Nov 2026 14:31:33 -0800
+Subject: [PATCH] local: delete closes the highlighted workspace in navigate
+ mode
+
+---
+ .../website/src/content/docs/ja/keyboard.mdx  |  2 +
+ .../website/src/content/docs/keyboard.mdx     |  2 +
+ .../src/content/docs/zh-cn/keyboard.mdx       |  2 +
+ src/client/shell/input.rs                     |  8 +++
+ src/client/shell/render.rs                    |  2 +
+ .../shell/tests/workspace_navigation.rs       | 58 ++++++++++++++++++-
+ src/input/keybind_help.rs                     |  1 +
+ 7 files changed, 74 insertions(+), 1 deletion(-)
+
+diff --git a/docs/next/website/src/content/docs/ja/keyboard.mdx b/docs/next/website/src/content/docs/ja/keyboard.mdx
+index cd7897fb..7d92a0a7 100644
+--- a/docs/next/website/src/content/docs/ja/keyboard.mdx
++++ b/docs/next/website/src/content/docs/ja/keyboard.mdx
+@@ -64,6 +64,8 @@ Herdr はマウスネイティブです。キーバインドをひとつも覚
+ 
+ Goto ピッカー (`prefix+g`) は、各エージェントとターミナルをワークスペースごとに一行ずつ表示します。分割タブのペインも隠さず表示されます。行をクリックするか Enter を押すと、そのペインへ直接移動します。`/` で名前、エージェントの種類、タブ、ワークスペース、ブランチ、パスを検索できます。検索入力中でなければ上下矢印キーまたは `j/k` で行を移動します。左右矢印キーは前後のワークスペースの最初のエージェントまたはターミナルへ移動し、端では折り返しません。検索入力中は左右矢印キーでテキストカーソルを動かします。`b/w/i/d` で blocked、working、idle、done のエージェントに絞り込み、`a` ですべてのターミナルに戻します。選択した移動先の場所とパスは一覧の下に表示されます。一覧が収まらない場合は、マウスホイール、スクロールバーのトラックのクリック、つまみのドラッグで、移動先を開かずにスクロールできます。
+ 
++ワークスペースナビゲーション (`prefix+w`) では、Delete で選択中のワークスペースを閉じます。通常の終了確認設定が適用され、worktree の親では従来どおりグループを閉じます。別のマシンのワークスペースは、先に Enter でアクティブにしてから閉じてください。
++
+ Esc または Ctrl+[ でワークスペースナビゲーションを終了します。Go To では、Shift が必要な配列でも `/` で検索を開けます。
+ 
+ ペインへの入力はアプリが要求するキーボードモードに従います。通常のシェルには Ctrl+Shift+letter を制御バイトとして送り、表現できない Super、Hyper、Meta の組み合わせは送りません。Kitty キーボード入力を使うアプリには、要求した修飾キーとキーイベントを送ります。report-all モード以外では、修飾付き Enter、Tab、Backspace の解放レポートは送りません。テンキーと修飾キー単独の押下も転送しません。
+diff --git a/docs/next/website/src/content/docs/keyboard.mdx b/docs/next/website/src/content/docs/keyboard.mdx
+index 216de5e9..df839133 100644
+--- a/docs/next/website/src/content/docs/keyboard.mdx
++++ b/docs/next/website/src/content/docs/keyboard.mdx
+@@ -64,6 +64,8 @@ The full keymap and the binding syntax live in the [keybinding reference](/docs/
+ 
+ The Goto picker (`prefix+g`) lists each agent or terminal on its own row, grouped by workspace. Split tabs never hide their panes behind another row. Click a row or press Enter to jump directly to it. Press `/` to search names, agent kinds, tabs, workspaces, branches, or paths; use Up/Down or `j/k` to move between rows when not typing a search. Left/Right jumps to the first agent or terminal in the previous/next workspace section, without wrapping. While editing a search, Left/Right moves the text cursor instead. Outside search, `b/w/i/d` filter blocked, working, idle, or done agents, and `a` shows all terminals again. The selected destination's location and path appear below the list. When the list overflows, use the mouse wheel, click the scrollbar track, or drag its thumb to scroll without opening a destination.
+ 
++In workspace navigation (`prefix+w`), press Delete to close the highlighted workspace, using the normal close confirmation setting. Worktree parents retain their group-close behavior. A workspace on another machine must first be activated with Enter before it can be closed.
++
+ Press Esc or Ctrl+[ to leave workspace navigation. In the Go To picker, `/` also opens search on layouts that require Shift to type it.
+ 
+ Pane input follows the keyboard modes requested by the app. Plain shells receive Ctrl+Shift+letter as its control byte; Super, Hyper, and Meta chords are dropped when the pane cannot represent them. Apps using Kitty keyboard input receive the modifiers and key events they request. Without report-all mode, modified Enter, Tab, and Backspace do not receive release reports. Keypad keys and modifier-only presses are not forwarded.
+diff --git a/docs/next/website/src/content/docs/zh-cn/keyboard.mdx b/docs/next/website/src/content/docs/zh-cn/keyboard.mdx
+index 2a5ed30d..08cee861 100644
+--- a/docs/next/website/src/content/docs/zh-cn/keyboard.mdx
++++ b/docs/next/website/src/content/docs/zh-cn/keyboard.mdx
+@@ -64,6 +64,8 @@ Herdr 是鼠标原生的。你可以点击窗格、标签页、工作区和智
+ 
+ Goto 选择器 (`prefix+g`) 按工作区分组，每个代理或终端各占一行，分割标签页中的窗格也会直接显示。点击一行或按回车即可跳转到对应窗格。按 `/` 搜索名称、代理类型、标签页、工作区、分支或路径；未输入搜索时，用上下方向键或 `j/k` 在各行之间移动，左右方向键跳到上一个或下一个工作区中的第一个代理或终端，到达两端后不会循环。编辑搜索内容时，左右方向键只移动文本光标。用 `b/w/i/d` 筛选 blocked、working、idle 或 done 状态的代理，按 `a` 重新显示所有终端。所选目标的位置和路径显示在列表下方。列表超出可视区域时，可以使用鼠标滚轮、点击滚动条轨道或拖动滑块来滚动，而不会打开目标。
+ 
++在工作区导航 (`prefix+w`) 中，按 Delete 关闭高亮的工作区，遵循正常的关闭确认设置。worktree 父工作区仍按原有行为关闭整个组。其他机器上的工作区必须先按回车激活，才能关闭。
++
+ 按 Esc 或 Ctrl+[ 退出工作区导航。在 Go To 中,即使布局需要 Shift 才能输入 `/`,也可以用它打开搜索。
+ 
+ 窗格输入遵循应用请求的键盘模式。普通 shell 将 Ctrl+Shift+字母作为控制字节接收;窗格无法表示的 Super、Hyper 和 Meta 组合键会被丢弃。使用 Kitty 键盘输入的应用会收到其请求的修饰键和按键事件。非 report-all 模式下,带修饰键的 Enter、Tab 和 Backspace 不接收释放报告。数字小键盘键和单独的修饰键按下也不会转发。
+diff --git a/src/client/shell/input.rs b/src/client/shell/input.rs
+index ee92d590..c3eb9789 100644
+--- a/src/client/shell/input.rs
++++ b/src/client/shell/input.rs
+@@ -833,6 +833,14 @@ impl ClientShellState {
+ 
+         if modifiers.is_empty() {
+             match code {
++                KeyCode::Delete => {
++                    self.record_navigate_binding(
++                        KeybindMatch::Action(KeybindAction::CloseWorkspace),
++                        false,
++                        outcome,
++                    );
++                    return;
++                }
+                 KeyCode::Tab => {
+                     self.record_navigate_binding(
+                         KeybindMatch::Action(KeybindAction::CyclePaneNext),
+diff --git a/src/client/shell/render.rs b/src/client/shell/render.rs
+index 82079bb4..4449a84d 100644
+--- a/src/client/shell/render.rs
++++ b/src/client/shell/render.rs
+@@ -107,6 +107,8 @@ pub(super) fn render_mode_bar(
+                     (" workspace  ".to_owned(), base),
+                     ("tab".to_owned(), key),
+                     (" pane  ".to_owned(), base),
++                    ("del".to_owned(), key),
++                    (" close  ".to_owned(), base),
+                     (prefix_rhs(&keybinds.keybinds.help), key),
+                     (" keybinds".to_owned(), base),
+                 ]);
+diff --git a/src/client/shell/tests/workspace_navigation.rs b/src/client/shell/tests/workspace_navigation.rs
+index c8d65591..c5b79982 100644
+--- a/src/client/shell/tests/workspace_navigation.rs
++++ b/src/client/shell/tests/workspace_navigation.rs
+@@ -71,6 +71,61 @@ fn workspace_rect(state: &ClientShellState, endpoint: &ClientEndpointId, workspa
+         .expect("visible workspace")
+ }
+ 
++#[test]
++fn navigation_delete_closes_highlighted_workspace_with_existing_confirmation() {
++    for (confirm_close, cancel) in [(false, false), (true, false), (true, true)] {
++        for remote_active in [false, true] {
++            let (mut state, remote) = navigation_state(workspaces(2));
++
++            if remote_active {
++                assert!(state.activate_endpoint_projection(&remote));
++            }
++
++            let endpoint = state.active_endpoint_id.clone();
++            state.config.confirm_close = confirm_close;
++            state.compose(100, 28).unwrap();
++            enter_navigation(&mut state);
++            preview_key(&mut state, b"\x1b[B");
++            assert_selected(&state, &endpoint, "ws_2");
++            assert_eq!(
++                state
++                    .snapshot
++                    .as_deref()
++                    .unwrap()
++                    .focused_workspace_id
++                    .as_deref(),
++                Some("ws_1")
++            );
++            let mut close = state.handle_input_bytes(b"\x1b[3~");
++
++            if confirm_close {
++                assert!(close.actions.is_empty());
++                assert!(matches!(
++                    state.overlay.as_ref(),
++                    Some(ClientShellOverlay::ConfirmClose(confirm))
++                        if confirm.workspace_id == "ws_2" && !confirm.close_group
++                ));
++                state.compose(100, 28).unwrap();
++                close = state.handle_input_bytes(if cancel { b"\x1b" } else { b"\r" });
++
++                if cancel {
++                    assert!(close.actions.is_empty());
++                    assert!(state.overlay.is_none());
++                    continue;
++                }
++            }
++
++            assert!(matches!(
++                close.actions.as_slice(),
++                [ClientShellAction::Endpoint { endpoint_id, request, .. }]
++                    if endpoint_id == &endpoint
++                        && matches!(&request.method, crate::api::schema::Method::WorkspaceClose(params)
++                            if params.workspace_id == "ws_2" && !params.close_group)
++            ));
++        }
++    }
++}
++
+ #[test]
+ fn local_navigation_highlight_stays_visible_with_terminal_theme() {
+     use ratatui::style::Color;
+@@ -237,6 +292,7 @@ fn foreign_preview_blocks_keyboard_actions_but_keeps_active_action_context() {
+         for key in [
+             b"W".as_slice(),
+             b"D",
++            b"\x1b[3~",
+             b"\x1b[D",
+             b"\x1b[C",
+             b"\t",
+@@ -538,7 +594,7 @@ fn active_preview_is_not_retargeted_by_deletion_or_reboot() {
+         assert!(state.visible_endpoint_notice.is_some());
+         for confirm in [false, true] {
+             state.config.confirm_close = confirm;
+-            for key in [b"W", b"D"] {
++            for key in [b"W".as_slice(), b"D", b"\x1b[3~"] {
+                 preview_key(&mut state, key);
+             }
+             assert!(state.overlay.is_none());
+diff --git a/src/input/keybind_help.rs b/src/input/keybind_help.rs
+index 80079488..10b82af9 100644
+--- a/src/input/keybind_help.rs
++++ b/src/input/keybind_help.rs
+@@ -115,6 +115,7 @@ pub(crate) fn keybind_help_groups(
+                 ),
+                 entry("tab / shift+tab", "cycle pane"),
+                 entry("enter", "open workspace"),
++                entry("delete", "close highlighted workspace"),
+                 entry("1..9", "switch workspace"),
+             ],
+         ),
+-- 
+2.43.0
+
