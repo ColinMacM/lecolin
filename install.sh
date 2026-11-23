@@ -140,8 +140,23 @@ install_herdr() {
   cargo install --locked --path "$HERDR_SRC"
 }
 
+# Reuse omp's peer-mail checkout so both plugins run the same swarm contract.
+setup_peer_mail() {
+  local src="$HOME/.omp/plugins/node_modules/peer-mail"
+  if [ -d "$src" ]; then
+    src="$(cd "$src" && pwd -P)"
+  else
+    src="$HOME/peer-mail"
+    clone https://github.com/ColinMacM/peer-mail.git "$src"
+    (cd "$src" && bun install --frozen-lockfile)
+    omp plugin link "$src"
+  fi
+  uv sync --locked --no-dev --project "$src/view"
+  herdr plugin link "$src"
+}
+
 # After the links: herdr's omp integration (writes its extension into
-# ~/.omp/agent/extensions) and the herdr plugins, each only if missing.
+# ~/.omp/agent/extensions), workflow plugins, and peer-mail's swarm view.
 setup_herdr() {
   have herdr || { say skip "herdr setup (no herdr)"; return; }
   if ! have omp; then
@@ -159,6 +174,11 @@ setup_herdr() {
       herdr plugin install "$plugin" --yes
     fi
   done
+  if have omp; then
+    setup_peer_mail
+  else
+    say skip "peer-mail swarm view (no omp)"
+  fi
 }
 
 [ "${1:-}" = --no-tools ] || install_tools

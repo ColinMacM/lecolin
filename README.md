@@ -127,11 +127,12 @@ navigate mode), the sidebar layout and two custom commands from `bin/`:
 Theme switches rewrite the linked `herdr/config.toml`, so they show up as Git changes.
 
 `install.sh` also installs herdr's omp integration (`herdr integration install omp`,
-which writes its own extension into `~/.omp/agent/extensions/`) and two herdr
-plugins: [Collie](https://github.com/AltanS/collie) (phone web UI over Tailscale)
-and [herdr-swarm](https://github.com/StructuPath/herdr-swarm), whose agent presets
-are in `herdr/plugins/structupath.swarm/presets.conf`. Collie still needs Tailscale
-and pairing on each machine; its `.env` and Tailscale handler stay local.
+which writes its own extension into `~/.omp/agent/extensions/`) and three herdr
+plugins: [Collie](https://github.com/AltanS/collie) (phone web UI over Tailscale),
+[herdr-swarm](https://github.com/StructuPath/herdr-swarm), whose agent presets
+are in `herdr/plugins/structupath.swarm/presets.conf`, and peer-mail's swarm view
+(`peer-mail.view`, pane `view`). Collie still needs Tailscale and pairing on each
+machine; its `.env` and Tailscale handler stay local.
 
 ## Syncing
 
@@ -171,21 +172,25 @@ SSH hosts, browser-container tooling, and Claude/Codex account settings stay loc
 
 ### peer-mail
 
-Keep [peer-mail](https://github.com/ColinMacM/peer-mail) in its own checkout.
-With [Bun](https://bun.sh/docs/installation) and uv installed:
+`install.sh` sets up [peer-mail](https://github.com/ColinMacM/peer-mail) for omp and
+its herdr swarm view. It reuses omp's linked checkout when present; otherwise it
+clones to `~/peer-mail`, installs its Bun dependencies, and links it into omp.
+It synchronizes the view's locked Python dependencies with uv and links the same
+checkout into herdr. Re-running does not clone or relink an existing omp plugin,
+and herdr registration is idempotent. `--no-tools` skips this setup.
+
+The pane is peer-mail's integrated Blueprint viewer in `view/`, not the separate
+Blueprint plugin or herdr-swarm's dashboard. To repeat only the view setup for an
+existing peer-mail checkout:
 
 ```sh
-git clone https://github.com/ColinMacM/peer-mail.git ~/peer-mail
-cd ~/peer-mail
-bun install
-(cd view && uv sync)                 # the swarm view
-omp plugin link "$HOME/peer-mail"
-herdr plugin link "$HOME/peer-mail"  # the swarm view pane
-omp plugin list
+uv sync --locked --no-dev --project /path/to/peer-mail/view
+herdr plugin link /path/to/peer-mail
+herdr plugin list --plugin peer-mail.view
 ```
 
-Restart omp sessions after installing or updating the plugin. Existing linked
-checkouts can stay where they are; do not clone or relink them unnecessarily.
+Restart omp sessions after installing or updating the plugin; `/swarm-view`
+reopens the pane in a running hub. No herdr restart is needed.
 Kitty's configured remote-control socket supports peer-mail's splits; restart
 Kitty after changing the socket settings. A hub running inside herdr spawns its
 agents into a herdr workspace instead and opens the swarm view beside itself.
