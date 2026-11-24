@@ -12,13 +12,18 @@ modelRoles:
   commit: anthropic/claude-sonnet-5-5
   tiny: cursor/grok-4.7:low
   memory: cursor/grok-4.7:high
-  default: openai-codex/gpt-6.1-sol:high
+  default: anthropic/claude-opus-5-5:high
 memory:
   backend: "off"
 tui:
   vimMode: true
 claudeResets:
   autoRedeem: "no"
-hideThinkingBlock: false
+hideThinkingBlock: true
 browser:
   enabled: false
+dev:
+  autoqaConsent: granted
+setupVersion: 3
+update:
+  auto: true
