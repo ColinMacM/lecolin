@@ -4,7 +4,7 @@ onboarding = false
 # Managed by ~/.local/bin/herdr-theme <name> (prefix+t cycles): it sets this,
 # the [theme.custom] table (whitby only), and the colors of the kitty window
 # herdr runs in. Other kitty tabs keep kitty's own theme.
-name = "solarized"
+name = "dracula"
 auto_switch = false
 
 [ui]
