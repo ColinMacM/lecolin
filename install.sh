@@ -121,22 +121,50 @@ install_tools() {
     "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/zsh-autosuggestions"
 }
 
-# herdr: upstream at the release in herdr/version plus the local patches in
+# herdr: upstream at the commit in herdr/base plus the local patches in
 # herdr/patches, built with cargo. An existing herdr or source checkout is left
 # alone (README, herdr, says how to rebuild one).
 HERDR_SRC="$HOME/Apps/herdr"
+
+# herdr's vendored libghostty-vt builds only with the Zig minor release named in
+# its build.zig.zon; Homebrew and distros often ship a newer one. Use zig from
+# PATH when it matches, else download that release into ~/.local; exports ZIG.
+herdr_zig() {
+  local want current os a dir url sum tmp actual
+  want="$(sed -n 's/.*minimum_zig_version = "\(.*\)".*/\1/p' \
+    "$HERDR_SRC/vendor/libghostty-vt/build.zig.zon")"
+  current="$(zig version 2>/dev/null || true)"
+  if [ "${current%.*}" = "${want%.*}" ]; then say ok "zig $current"; return; fi
+  if [ "$OS" = Darwin ]; then os=macos; else os=linux; fi
+  case "$ARCH" in arm64|aarch64) a=aarch64 ;; *) a=x86_64 ;; esac
+  dir="$HOME/.local/zig-$a-$os-$want"
+  if [ ! -x "$dir/zig" ]; then
+    read -r url sum < <(curl -fsSL https://ziglang.org/download/index.json \
+      | jq -r --arg v "$want" --arg t "$a-$os" '.[$v][$t] | "\(.tarball) \(.shasum)"')
+    tmp="$(mktemp)"
+    curl -fsSL "$url" -o "$tmp"
+    if have sha256sum; then actual="$(sha256sum < "$tmp")"; else actual="$(shasum -a 256 < "$tmp")"; fi
+    [ "${actual%% *}" = "$sum" ] || { rm -f "$tmp"; echo "zig $want: checksum mismatch"; exit 1; }
+    tar -xJf "$tmp" -C "$HOME/.local"
+    rm -f "$tmp"
+  fi
+  export ZIG="$dir/zig"
+  say ok "zig $want ($ZIG)"
+}
+
 install_herdr() {
   if have herdr; then say ok "herdr ($(herdr --version))"; return; fi
   if [ -e "$HERDR_SRC" ]; then say skip "herdr: $HERDR_SRC exists, build it there"; return; fi
-  local version
-  read -r version < "$REPO/herdr/version"
+  local base
+  read -r base < "$REPO/herdr/base"
   if [ "$OS" = Linux ] && ! have cc; then pkg_install gcc; fi
   if ! have cargo; then
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
   fi
-  git clone --depth=1 --branch "v$version" https://github.com/ogulcancelik/herdr "$HERDR_SRC"
-  git -C "$HERDR_SRC" switch -c colin/ui-fork
+  git clone https://github.com/ogulcancelik/herdr "$HERDR_SRC"
+  git -C "$HERDR_SRC" switch -c colin/ui-fork "$base"
   git -C "$HERDR_SRC" -c user.name=lecolin -c user.email=lecolin@localhost am "$REPO"/herdr/patches/*.patch
+  herdr_zig
   cargo install --locked --path "$HERDR_SRC"
 }
 

@@ -39,7 +39,7 @@ Each tool is installed only if it is missing:
 | oh-my-zsh, zsh-autosuggestions | git clone | git clone | — |
 | omp | official binary installer, version in `omp/version` | same | install separately |
 | bun, uv | official installers (they don't edit `.zshrc`) | same | — |
-| herdr | upstream source at `herdr/version` + `herdr/patches`, built with cargo (rustup if missing) | same | — |
+| herdr | upstream source at `herdr/base` + `herdr/patches`, built with cargo (rustup if missing) and the Zig release it pins (downloaded to `~/.local` if `zig` differs) | same | — |
 
 Then it links the configs:
 
@@ -93,23 +93,30 @@ link with a plain file, copy it back into the repo and rerun `install.sh --no-to
 ## herdr
 
 herdr runs as a patched build: upstream [herdr](https://github.com/ogulcancelik/herdr)
-at the release in `herdr/version` with the commits in `herdr/patches` (sidebar on
-the left edge, rounded corners and pill tabs, the icon sidebar token, pane border
-theme tokens, and Delete closing the highlighted workspace in navigate mode). On a
+at the commit in `herdr/base` (a release tag's commit or a `master` commit) with
+the commits in `herdr/patches` (sidebar on the left edge, rounded corners and pill
+tabs, the icon sidebar token, pane border theme tokens, and Delete closing the
+highlighted workspace in navigate mode). On a
 machine without herdr, `install.sh` clones it to `~/Apps/herdr`, applies the
-patches on branch `colin/ui-fork` and runs `cargo install`. An existing herdr or
+patches on branch `colin/ui-fork` and runs `cargo install`. herdr's bundled
+libghostty-vt needs the exact Zig minor release named in
+`~/Apps/herdr/vendor/libghostty-vt/build.zig.zon` (0.16 for the pinned base), so
+`install.sh` downloads that Zig when `zig version` differs. An existing herdr or
 checkout is left alone. To rebuild one, or to update the patches after changing
 the fork:
 
 ```sh
-cargo install --locked --path ~/Apps/herdr                        # rebuild
+ZIG=~/.local/zig-aarch64-macos-0.16.0/zig \
+  cargo install --locked --path ~/Apps/herdr                      # rebuild (omit ZIG if `zig version` is 0.16.x)
 rm ~/lecolin/herdr/patches/*.patch && \
-  git -C ~/Apps/herdr format-patch "v$(cat ~/lecolin/herdr/version)..colin/ui-fork" \
+  git -C ~/Apps/herdr format-patch "$(cat ~/lecolin/herdr/base)..colin/ui-fork" \
     -o ~/lecolin/herdr/patches                                     # export the fork
 ```
 
-Moving to a newer herdr release means rebasing `colin/ui-fork` onto its tag,
-exporting the patches again and updating `herdr/version`.
+Moving to newer upstream means `git -C ~/Apps/herdr fetch origin`, rebasing
+`colin/ui-fork` onto the new tag or `origin/master` commit (`git rebase --onto
+<new> $(cat ~/lecolin/herdr/base)`), exporting the patches again and writing the
+new commit's full hash to `herdr/base`.
 
 `herdr/config.toml` holds the keys (prefix+arrows/hjkl between panes, vim keys in
 navigate mode), the sidebar layout and two custom commands from `bin/`:

@@ -1,7 +1,7 @@
-From d43c6aeb0aef890ee9437345b48ebbfc2aa1b305 Mon Sep 17 00:00:00 2001
+From 786ce94443373403c06f685ee8571017fc8d373e Mon Sep 17 00:00:00 2001
 From: colin <colin@localhost>
 Date: Mon, 9 Nov 2026 16:32:51 -0800
-Subject: [PATCH 3/3] local: pane_border and pane_border_focused theme tokens
+Subject: [PATCH 3/4] local: pane_border and pane_border_focused theme tokens
 
 ---
  .../src/content/docs/configuration.mdx        |  2 +-
@@ -307,5 +307,5 @@ index c66cb4b9..592d1872 100644
          cell.set_style(Style::default().fg(color));
      }
 -- 
-2.43.0
+2.54.0 (Apple Git-157)
 

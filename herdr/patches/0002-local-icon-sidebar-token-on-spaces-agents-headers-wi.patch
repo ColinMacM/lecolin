@@ -1,7 +1,7 @@
-From 23bf0b8f7852c4576e166aa2266718958e4e146f Mon Sep 17 00:00:00 2001
+From 0bdc02772ac4d27fe50c6bf9cd6401eb95c0e4bc Mon Sep 17 00:00:00 2001
 From: colin <colin@localhost>
 Date: Mon, 9 Nov 2026 16:07:50 -0800
-Subject: [PATCH 2/3] local: icon sidebar token, + on spaces/agents headers,
+Subject: [PATCH 2/4] local: icon sidebar token, + on spaces/agents headers,
  wider pill tabs
 
 ---
@@ -403,5 +403,5 @@ index c1e38aa9..c01750e8 100644
          " "
      } else {
 -- 
-2.43.0
+2.54.0 (Apple Git-157)
 

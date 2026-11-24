@@ -1,7 +1,7 @@
-From 0ca7c74f5a681ae8cf55350accd1afb9a415932c Mon Sep 17 00:00:00 2001
+From 72f45fe6e06e6218293ef2212a10fee3a222eaf0 Mon Sep 17 00:00:00 2001
 From: colin <colin@localhost>
 Date: Mon, 9 Nov 2026 15:48:06 -0800
-Subject: [PATCH 1/3] local: sidebar_on_left_edge, rounded corners, pill tabs,
+Subject: [PATCH 1/4] local: sidebar_on_left_edge, rounded corners, pill tabs,
  chrome color glides
 
 ---
@@ -28,10 +28,10 @@ Subject: [PATCH 1/3] local: sidebar_on_left_edge, rounded corners, pill tabs,
  create mode 100644 src/client/shell/motion.rs
 
 diff --git a/src/client/mod.rs b/src/client/mod.rs
-index f55db195..ca0ceb69 100644
+index b8039f42..fc1ff5be 100644
 --- a/src/client/mod.rs
 +++ b/src/client/mod.rs
-@@ -2325,7 +2325,8 @@ async fn run_client_loop(
+@@ -2349,7 +2349,8 @@ async fn run_client_loop(
                          outcome.repaint |= notification_repaint
                              | shell.tick_copy_feedback(now)
                              | shell.tick_workspace_highlight(now)
@@ -54,7 +54,7 @@ index 2d180443..b1424020 100644
  mod notification_policy;
  mod notifications;
 diff --git a/src/client/shell/actions.rs b/src/client/shell/actions.rs
-index 83819b0d..e55ca724 100644
+index 08a8ae14..387b35a0 100644
 --- a/src/client/shell/actions.rs
 +++ b/src/client/shell/actions.rs
 @@ -149,12 +149,7 @@ impl ClientShellState {
@@ -1112,5 +1112,5 @@ index d8371cdb..4b92232b 100644
          .style(Style::default().bg(palette.panel_bg));
      let inner = block.inner(feedback_area);
 -- 
-2.43.0
+2.54.0 (Apple Git-157)
 

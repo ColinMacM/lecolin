@@ -1,8 +1,8 @@
-From c53545a2246c0a0ac4eb71d660eb47537ca94b59 Mon Sep 17 00:00:00 2001
+From b66f9ed4c1197294526ef38ea6fb1202adf61f81 Mon Sep 17 00:00:00 2001
 From: Colin MacMillan <nilocmac64@gmail.com>
 Date: Wed, 11 Nov 2026 14:31:33 -0800
-Subject: [PATCH] local: delete closes the highlighted workspace in navigate
- mode
+Subject: [PATCH 4/4] local: delete closes the highlighted workspace in
+ navigate mode
 
 ---
  .../website/src/content/docs/ja/keyboard.mdx  |  2 +
@@ -181,5 +181,5 @@ index 80079488..10b82af9 100644
              ],
          ),
 -- 
-2.43.0
+2.54.0 (Apple Git-157)
 
