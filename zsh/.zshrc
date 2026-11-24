@@ -243,7 +243,10 @@ graphify() {
 [ -f "$HOME/.claude-profiles/shell.zsh" ] && . "$HOME/.claude-profiles/shell.zsh"
 
 # Rust toolchain (rustup): puts rustc, cargo, rust-analyzer on PATH.
+# Homebrew's rustup never writes ~/.cargo/env, so add cargo-installed binaries
+# (herdr, cargo-nextest) here too; .zprofile only runs for login shells.
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+[[ -d "$HOME/.cargo/bin" ]] && path=("$HOME/.cargo/bin" $path)
 
 # GitHub MCP plugin for Claude Code (reuses gh CLI login)
 command -v gh >/dev/null && export GITHUB_PERSONAL_ACCESS_TOKEN="$(gh auth token 2>/dev/null)"
